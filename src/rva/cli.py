@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 
+from rva.agent import AgentRuntime
 from rva.ari import AriClient, AriError
 from rva.colab import ColabOrchestrator
 from rva.dashboard import (
@@ -56,6 +57,13 @@ def main(argv: list[str] | None = None) -> int:
     rec_sub = recordings.add_subparsers(dest="recordings_cmd", required=True)
     rec_status = rec_sub.add_parser("status", help="Show whether post-call archive is enabled")
     rec_status.set_defaults(handler=_recordings_status)
+    agent = sub.add_parser("agent", help="Full agent: ARI + AudioSocket + dashboard")
+    agent_sub = agent.add_subparsers(dest="agent_cmd", required=True)
+    agent_serve = agent_sub.add_parser(
+        "serve",
+        help="Loopback dashboard, AudioSocket listener, ARI Stasis",
+    )
+    agent_serve.set_defaults(handler=_agent_serve)
     args = parser.parse_args(argv)
     return int(args.handler(args))
 
@@ -134,6 +142,19 @@ def _recordings_status(_args: argparse.Namespace) -> int:
     json.dump(payload, sys.stdout, indent=2)
     sys.stdout.write("\n")
     return 0
+
+
+def _agent_serve(_args: argparse.Namespace) -> int:
+    try:
+        runtime = AgentRuntime()
+        payload = runtime.start()
+    except (AriError, DashboardError) as exc:
+        json.dump({"error": str(exc)}, sys.stdout)
+        sys.stdout.write("\n")
+        return 1
+    json.dump(payload, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    return runtime.run_until_interrupt()
 
 
 def _colab_status(_args: argparse.Namespace) -> int:

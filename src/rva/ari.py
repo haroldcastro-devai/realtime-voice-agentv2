@@ -166,6 +166,7 @@ class AriApp:
         self.continue_exten = continue_exten
         self.sessions: dict[str, CallSession] = {}
         self.by_uuid: dict[str, CallSession] = {}
+        self._socket_uuid_to_channel: dict[str, str] = {}
 
     def handle_event(self, event: dict[str, object]) -> CallSession | None:
         etype = event.get("type")
@@ -178,13 +179,14 @@ class AriApp:
                 raise AriError("StasisStart missing channel id")
             audio_uuid = _stasis_uuid(event)
             session = self._factory()
+            socket_uuid = audiosocket_uuid(audio_uuid)
             if self.rest is not None:
-                socket_uuid = audiosocket_uuid(audio_uuid)
                 self.rest.set_channel_var(channel_id, AUDIO_SOCKET_VAR, socket_uuid)
                 self.rest.continue_channel(channel_id, self.continue_context, self.continue_exten)
             activate_call_pin()
             REGISTRY.on_stasis_start(channel_id)
             self.sessions[channel_id] = session
+            self._socket_uuid_to_channel[socket_uuid] = channel_id
             if audio_uuid is not None:
                 self.by_uuid[audio_uuid] = session
             return session
@@ -202,8 +204,15 @@ class AriApp:
                         for key, value in list(self.by_uuid.items()):
                             if value is session:
                                 self.by_uuid.pop(key, None)
+                        for key, value in list(self._socket_uuid_to_channel.items()):
+                            if value == channel_id:
+                                self._socket_uuid_to_channel.pop(key, None)
             return None
         return None
+
+    def channel_for_socket_uuid(self, socket_uuid: str) -> str | None:
+        """Map AudioSocket UUID wire string to ARI channel id."""
+        return self._socket_uuid_to_channel.get(socket_uuid)
 
 
 def _stasis_uuid(event: dict[str, object]) -> str | None:

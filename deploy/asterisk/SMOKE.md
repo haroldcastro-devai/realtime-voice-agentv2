@@ -6,12 +6,16 @@ start Asterisk, pjsua, or Docker for this story.
 ## Prerequisites
 
 1. [deploy/asterisk/README.md](README.md): `docker compose up` (Asterisk on loopback).
-2. Agent AudioSocket listener on `0.0.0.0:8090` (see `.env.example` `RVA_AUDIOSOCKET_*`).
-3. **ARI app `rva` running** against `http://127.0.0.1:8088` with `RVA_ARI_*` from
-   `.env.example`. On `StasisStart`, the app must `continue` the channel into dialplan
-   context `[audiosocket]` (see `src/rva/ari.py`). Without it, extension **1000** stops
-   in Stasis and never reaches AudioSocket.
-4. Optional stub (no full agent yet):
+2. **Full agent** on the host (ARI + AudioSocket + dashboard in one process):
+
+```bash
+rva agent serve
+```
+
+Set `RVA_ARI_*`, `RVA_AUDIOSOCKET_*` (bind `0.0.0.0:8090`), and optional
+`RVA_DASHBOARD_*` from `.env.example`. On `StasisStart`, the app `continue`s the
+channel into `[audiosocket]` (see `src/rva/ari.py`).
+3. Optional frame-only stub (no pipeline):
 
 ```bash
 python scripts/audiosocket_smoke_stub.py

@@ -1,7 +1,7 @@
 """Optional post-call PCM archive (fictional MinIO bucket + RabbitMQ notice).
 
 Disabled unless ``RVA_RECORDINGS_ENABLE=1``. Default bucket name is fictional.
-``CALL_BUFFER.append_pcm`` is for tests and future AudioSocket wiring (not hooked yet).
+Live AudioSocket PCM is appended by ``rva.audiosocket_server`` while a call is up.
 
 When ``RVA_MINIO_ENDPOINT`` / ``RVA_RABBITMQ_URL`` are unset or ``CHANGE_ME``, in-memory
 doubles are used. Loopback HTTP PUT/POST is used when those URLs point at ``127.0.0.1`` /
