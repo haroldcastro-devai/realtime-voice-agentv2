@@ -101,3 +101,44 @@ def test_server_accepts_uuid_mapped_call(monkeypatch: pytest.MonkeyPatch) -> Non
     stop.set()
     thread.join(timeout=5.0)
     assert len(CALL_BUFFER.take_pcm("ch-listen")) > 0
+
+
+def test_run_call_pipeline_turn_twice(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RVA_VAD_RMS_THRESHOLD", "100")
+    CALL_BUFFER.reset_for_tests()
+    app = AriApp()
+    app.handle_event(_stasis_start("ch-two"))
+    session = app.sessions["ch-two"]
+    pipeline = build_pipeline()
+    clock = FakeClock()
+    server_sock, client = socket.socketpair()
+
+    def _utterance() -> None:
+        for _ in range(6):
+            client.sendall(_tone_frame())
+        for _ in range(8):
+            client.sendall(pack_frame(PCM, b"\x00\x00" * 160))
+
+    done = threading.Event()
+
+    def worker() -> None:
+        run_audiosocket_call(
+            server_sock,
+            ari_app=app,
+            pipeline=pipeline,
+            channel_id="ch-two",
+            session=session,
+            clock=clock,
+        )
+        done.set()
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    _utterance()
+    time.sleep(0.05)
+    _utterance()
+    client.sendall(pack_frame(HANGUP))
+    assert done.wait(timeout=5.0)
+    client.close()
+    stt = pipeline.stt
+    assert len(stt.calls) >= 2  # type: ignore[attr-defined]

@@ -7,6 +7,7 @@ import json
 import sys
 
 from rva.agent import AgentRuntime
+from rva.audiosocket_server import AudioSocketError
 from rva.ari import AriClient, AriError
 from rva.colab import ColabOrchestrator
 from rva.dashboard import (
@@ -148,7 +149,7 @@ def _agent_serve(_args: argparse.Namespace) -> int:
     runtime = AgentRuntime()
     try:
         payload = runtime.start()
-    except (AriError, DashboardError) as exc:
+    except (AriError, DashboardError, AudioSocketError) as exc:
         json.dump({"error": str(exc)}, sys.stdout)
         sys.stdout.write("\n")
         return 1
