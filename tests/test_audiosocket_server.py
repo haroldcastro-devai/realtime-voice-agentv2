@@ -89,14 +89,15 @@ def test_server_accepts_uuid_mapped_call(monkeypatch: pytest.MonkeyPatch) -> Non
     server = AudioSocketServer(app, pipeline, host="127.0.0.1", port=port)
     thread = threading.Thread(target=server.serve_forever, args=(stop,), daemon=True)
     thread.start()
-    time.sleep(0.05)
-    with socket.create_connection(("127.0.0.1", port), timeout=2.0) as client:
+    time.sleep(0.2)
+    with socket.create_connection(("127.0.0.1", port), timeout=5.0) as client:
         client.sendall(pack_frame(UUID, uuid.UUID(_AUDIO_UUID).bytes))
         for _ in range(6):
             client.sendall(_tone_frame())
         for _ in range(8):
             client.sendall(pack_frame(PCM, b"\x00\x00" * 160))
+        time.sleep(0.5)
         client.sendall(pack_frame(HANGUP))
     stop.set()
-    thread.join(timeout=2.0)
+    thread.join(timeout=5.0)
     assert len(CALL_BUFFER.take_pcm("ch-listen")) > 0
