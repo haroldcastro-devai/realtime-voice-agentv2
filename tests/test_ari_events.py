@@ -57,8 +57,7 @@ def test_iter_ari_events_reads_json() -> None:
                     f"Sec-WebSocket-Accept: {accept}\r\n"
                     "\r\n"
                 ).encode("ascii")
-                conn.sendall(response)
-                conn.sendall(_ws_text_frame(json.dumps(event)))
+                conn.sendall(response + _ws_text_frame(json.dumps(event)))
                 conn.sendall(bytes([0x88, 0x00]))
 
     ready = threading.Event()
@@ -66,9 +65,53 @@ def test_iter_ari_events_reads_json() -> None:
     thread = threading.Thread(target=serve, daemon=True)
     thread.start()
     assert ready.wait(timeout=2.0)
+    assert "p" in ports
     client = AriClient(f"http://{_LOOP}:{ports['p']}", "rva", "rva-ari-demo", app="rva")
     items = list(iter_ari_events(client))
     assert items == [event]
+    thread.join(timeout=1.0)
+
+
+def test_ws_ping_gets_pong() -> None:
+    ready = threading.Event()
+    port_holder: list[int] = []
+
+    def serve() -> None:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind((_LOOP, 0))
+            sock.listen(1)
+            port_holder.append(sock.getsockname()[1])
+            ready.set()
+            conn, _ = sock.accept()
+            with conn:
+                request = b""
+                while b"\r\n\r\n" not in request:
+                    request += conn.recv(4096)
+                sec_key = b""
+                for line in request.split(b"\r\n"):
+                    if line.lower().startswith(b"sec-websocket-key:"):
+                        sec_key = line.split(b":", 1)[1].strip()
+                accept = _accept_key(sec_key.decode("ascii"))
+                conn.sendall(
+                    (
+                        "HTTP/1.1 101 Switching Protocols\r\n"
+                        f"Sec-WebSocket-Accept: {accept}\r\n"
+                        "\r\n"
+                    ).encode("ascii")
+                )
+                conn.sendall(bytes([0x89, 0x04]) + b"ping")
+                pong_hdr = conn.recv(2)
+                assert pong_hdr[0] & 0x0F == 0xA
+                payload = conn.recv(4)
+                assert payload == b"ping"
+                conn.sendall(bytes([0x88, 0x00]))
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    assert ready.wait(timeout=2.0)
+    client = AriClient(f"http://{_LOOP}:{port_holder[0]}", "u", "p", app="rva")
+    items = list(iter_ari_events(client))
+    assert items == []
     thread.join(timeout=1.0)
 
 
@@ -105,6 +148,6 @@ def test_open_ari_events_socket_upgrade() -> None:
     thread.start()
     assert ready.wait(timeout=2.0)
     client = AriClient(f"http://{_LOOP}:{port_holder[0]}", "u", "p", app="rva")
-    ws = open_ari_events_socket(client)
-    ws.close()
+    conn = open_ari_events_socket(client)
+    conn.sock.close()
     thread.join(timeout=1.0)

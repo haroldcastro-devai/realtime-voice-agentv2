@@ -73,6 +73,8 @@ class CallSession:
         outbound_pcm8k: bytes,
         inbound: Iterable[Frame],
         frame_bytes: int = _FRAME_S16_8K,
+        *,
+        drain_inbound_after: bool = True,
     ) -> PlayResult:
         """Send outbound PCM while draining inbound frames (interleaved).
 
@@ -101,7 +103,8 @@ class CallSession:
                 packed.append(self._emit_pcm(chunk, frame_bytes))
             with self._lock:
                 self._agent_speaking = False
-            self._drain_rest(inbound_iter)
+            if drain_inbound_after:
+                self._drain_rest(inbound_iter)
             return PlayResult(
                 completed=True,
                 barge_ins=self.barge_ins - before,
@@ -119,6 +122,8 @@ class CallSession:
         sock: SocketLike,
         clock: Clock | None = None,
         frame_bytes: int = _FRAME_S16_8K,
+        *,
+        drain_inbound_after: bool = True,
     ) -> PlayResult:
         """``play()`` then pace packed frames onto ``sock`` (injectable clock).
 
@@ -126,7 +131,12 @@ class CallSession:
         before abort still go on the wire at 20 ms. Hangup with empty ``packed``
         writes nothing. Real TCP belongs to a later issue.
         """
-        result = self.play(outbound_pcm8k, inbound, frame_bytes=frame_bytes)
+        result = self.play(
+            outbound_pcm8k,
+            inbound,
+            frame_bytes=frame_bytes,
+            drain_inbound_after=drain_inbound_after,
+        )
         if result.packed:
             PacedTx(sock, clock=clock).send_frames(result.packed)
         return result

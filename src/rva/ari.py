@@ -180,15 +180,23 @@ class AriApp:
             audio_uuid = _stasis_uuid(event)
             session = self._factory()
             socket_uuid = audiosocket_uuid(audio_uuid)
-            if self.rest is not None:
-                self.rest.set_channel_var(channel_id, AUDIO_SOCKET_VAR, socket_uuid)
-                self.rest.continue_channel(channel_id, self.continue_context, self.continue_exten)
             activate_call_pin()
             REGISTRY.on_stasis_start(channel_id)
             self.sessions[channel_id] = session
             self._socket_uuid_to_channel[socket_uuid] = channel_id
             if audio_uuid is not None:
                 self.by_uuid[audio_uuid] = session
+            if self.rest is not None:
+                try:
+                    self.rest.set_channel_var(channel_id, AUDIO_SOCKET_VAR, socket_uuid)
+                    self.rest.continue_channel(
+                        channel_id, self.continue_context, self.continue_exten
+                    )
+                except Exception as exc:
+                    self._rollback_stasis_start(channel_id, socket_uuid, audio_uuid, session)
+                    if isinstance(exc, AriError):
+                        raise
+                    raise AriError(str(exc)) from exc
             return session
         if etype == "StasisEnd":
             channel = event.get("channel")
@@ -213,6 +221,20 @@ class AriApp:
     def channel_for_socket_uuid(self, socket_uuid: str) -> str | None:
         """Map AudioSocket UUID wire string to ARI channel id."""
         return self._socket_uuid_to_channel.get(socket_uuid)
+
+    def _rollback_stasis_start(
+        self,
+        channel_id: str,
+        socket_uuid: str,
+        audio_uuid: str | None,
+        session: CallSession,
+    ) -> None:
+        self.sessions.pop(channel_id, None)
+        self._socket_uuid_to_channel.pop(socket_uuid, None)
+        if audio_uuid is not None:
+            self.by_uuid.pop(audio_uuid, None)
+        release_call_pin()
+        REGISTRY.on_stasis_end(channel_id)
 
 
 def _stasis_uuid(event: dict[str, object]) -> str | None:

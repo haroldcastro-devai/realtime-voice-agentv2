@@ -145,8 +145,8 @@ def _recordings_status(_args: argparse.Namespace) -> int:
 
 
 def _agent_serve(_args: argparse.Namespace) -> int:
+    runtime = AgentRuntime()
     try:
-        runtime = AgentRuntime()
         payload = runtime.start()
     except (AriError, DashboardError) as exc:
         json.dump({"error": str(exc)}, sys.stdout)

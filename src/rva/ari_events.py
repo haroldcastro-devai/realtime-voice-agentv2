@@ -9,12 +9,21 @@ import os
 import socket
 import struct
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 from json import JSONDecodeError
 from urllib.parse import urlparse
 
 from rva.ari import AriClient, AriError
 
 _WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+@dataclass
+class AriWsConnection:
+    """One ARI events WebSocket with optional post-handshake bytes buffered."""
+
+    sock: socket.socket
+    pending: bytes = field(default=b"")
 
 
 def _timeout() -> float:
@@ -40,7 +49,7 @@ def _read_exact(sock: socket.socket, nbytes: int) -> bytes:
     return b"".join(chunks)
 
 
-def _ws_handshake(sock: socket.socket, host: str, path: str, auth_header: str) -> None:
+def _ws_handshake(sock: socket.socket, host: str, path: str, auth_header: str) -> bytes:
     key = base64.b64encode(os.urandom(16)).decode("ascii")
     request = (
         f"GET {path} HTTP/1.1\r\n"
@@ -59,7 +68,7 @@ def _ws_handshake(sock: socket.socket, host: str, path: str, auth_header: str) -
         if not chunk:
             raise AriError("ARI WebSocket handshake failed")
         response += chunk
-    header, _body = response.split(b"\r\n\r\n", 1)
+    header, body = response.split(b"\r\n\r\n", 1)
     if b"101" not in header.split(b"\r\n", 1)[0]:
         raise AriError("ARI WebSocket upgrade rejected")
     accept = None
@@ -72,32 +81,67 @@ def _ws_handshake(sock: socket.socket, host: str, path: str, auth_header: str) -
     )
     if accept != digest:
         raise AriError("ARI WebSocket accept mismatch")
+    return body
 
 
-def _read_ws_text(sock: socket.socket) -> str | None:
-    hdr = _read_exact(sock, 2)
-    opcode = hdr[0] & 0x0F
-    masked = bool(hdr[1] & 0x80)
-    length = hdr[1] & 0x7F
-    if length == 126:
-        length = struct.unpack("!H", _read_exact(sock, 2))[0]
-    elif length == 127:
-        length = struct.unpack("!Q", _read_exact(sock, 8))[0]
-    mask_key = b""
-    if masked:
-        mask_key = _read_exact(sock, 4)
-    payload = _read_exact(sock, length)
-    if masked:
-        payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
-    if opcode == 0x8:
+def _take(conn: AriWsConnection, nbytes: int) -> bytes:
+    if len(conn.pending) >= nbytes:
+        out = conn.pending[:nbytes]
+        conn.pending = conn.pending[nbytes:]
+        return out
+    need = nbytes - len(conn.pending)
+    out = conn.pending + _read_exact(conn.sock, need)
+    conn.pending = b""
+    return out
+
+
+def _send_ws_pong(sock: socket.socket, payload: bytes) -> None:
+    length = len(payload)
+    if length < 126:
+        header = bytes([0x8A, length])
+    elif length < 65536:
+        header = bytes([0x8A, 126]) + struct.pack("!H", length)
+    else:
+        header = bytes([0x8A, 127]) + struct.pack("!Q", length)
+    sock.sendall(header + payload)
+
+
+def _read_ws_message(conn: AriWsConnection) -> tuple[int, bytes | None]:
+    """Read one WebSocket frame; return ``(opcode, payload)`` or ``(0x8, None)`` on close."""
+    while True:
+        hdr = _take(conn, 2)
+        opcode = hdr[0] & 0x0F
+        masked = bool(hdr[1] & 0x80)
+        length = hdr[1] & 0x7F
+        if length == 126:
+            length = struct.unpack("!H", _take(conn, 2))[0]
+        elif length == 127:
+            length = struct.unpack("!Q", _take(conn, 8))[0]
+        mask_key = _take(conn, 4) if masked else b""
+        payload = _take(conn, length)
+        if masked:
+            payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
+        if opcode == 0x8:
+            return 0x8, None
+        if opcode == 0x9:
+            _send_ws_pong(conn.sock, payload)
+            continue
+        if opcode == 0xA:
+            continue
+        return opcode, payload
+
+
+def _read_ws_text(conn: AriWsConnection) -> str | None:
+    opcode, payload = _read_ws_message(conn)
+    if opcode == 0x8 or payload is None:
         return None
     if opcode != 0x1:
         return ""
     return payload.decode("utf-8")
 
 
-def open_ari_events_socket(client: AriClient) -> socket.socket:
-    """TCP socket after a successful ARI events WebSocket handshake."""
+def open_ari_events_socket(client: AriClient) -> AriWsConnection:
+    """WebSocket to ARI events with handshake bytes retained for the first frame."""
     url = client.events_url()
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
@@ -113,20 +157,17 @@ def open_ari_events_socket(client: AriClient) -> socket.socket:
     path = parsed.path or "/"
     if parsed.query:
         path = f"{path}?{parsed.query}"
-    _ws_handshake(sock, f"{host}:{port}", path, f"Basic {token}")
-    sock.settimeout(_timeout())
-    return sock
+    pending = _ws_handshake(sock, f"{host}:{port}", path, f"Basic {token}")
+    sock.settimeout(None)
+    return AriWsConnection(sock=sock, pending=pending)
 
 
 def iter_ari_events(client: AriClient) -> Iterator[dict[str, object]]:
     """Yield ARI JSON event objects until the WebSocket closes."""
-    sock = open_ari_events_socket(client)
+    conn = open_ari_events_socket(client)
     try:
         while True:
-            try:
-                raw = _read_ws_text(sock)
-            except (TimeoutError, OSError) as exc:
-                raise AriError(str(exc)) from exc
+            raw = _read_ws_text(conn)
             if raw is None:
                 break
             if not raw:
@@ -138,4 +179,4 @@ def iter_ari_events(client: AriClient) -> Iterator[dict[str, object]]:
             if isinstance(data, dict):
                 yield data
     finally:
-        sock.close()
+        conn.sock.close()

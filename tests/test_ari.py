@@ -269,6 +269,24 @@ def test_register_redirect_is_rejected() -> None:
         server.server_close()
 
 
+def test_socket_uuid_mapped_before_continue() -> None:
+    seen = {"mapped": False}
+    holder: list[AriApp] = []
+
+    class Rest:
+        def set_channel_var(self, _ch: str, _var: str, _val: str) -> None:
+            return
+
+        def continue_channel(self, channel_id: str, _ctx: str, _ext: str) -> None:
+            socket_uuid = audiosocket_uuid(_AUDIO_UUID)
+            seen["mapped"] = holder[0].channel_for_socket_uuid(socket_uuid) == channel_id
+
+    app = AriApp(rest=Rest())
+    holder.append(app)
+    app.handle_event(_stasis_start("chan-early"))
+    assert seen["mapped"] is True
+
+
 def test_channel_for_socket_uuid_after_stasis_start() -> None:
     app = AriApp()
     app.handle_event(_stasis_start("chan-map"))
