@@ -207,13 +207,18 @@ class AudioSocketServer:
         return self._host, self._port
 
     def verify_bind(self) -> None:
-        """Fail fast when the listen address is not available."""
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                probe.bind((self._host, self._port))
-            except OSError as exc:
-                raise AudioSocketError(str(exc)) from exc
+        """Open the listen socket before the agent prints startup JSON."""
+        if self._listener is not None:
+            return
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            listener.bind((self._host, self._port))
+        except OSError as exc:
+            listener.close()
+            raise AudioSocketError(str(exc)) from exc
+        listener.listen(8)
+        self._listener = listener
 
     def close_listener(self) -> None:
         listener = self._listener
@@ -226,16 +231,12 @@ class AudioSocketServer:
         self._listener = None
 
     def serve_forever(self, stop: StopFlag | None = None) -> None:
-        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            listener.bind((self._host, self._port))
-        except OSError as exc:
-            listener.close()
-            raise AudioSocketError(str(exc)) from exc
-        listener.listen(8)
+        if self._listener is None:
+            self.verify_bind()
+        listener = self._listener
+        if listener is None:
+            raise AudioSocketError("AudioSocket listener is not open")
         listener.settimeout(self._accept_timeout_s)
-        self._listener = listener
         try:
             while stop is None or not stop.is_set():
                 try:
