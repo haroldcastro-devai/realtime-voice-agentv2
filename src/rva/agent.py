@@ -59,6 +59,7 @@ class AgentRuntime:
             payload["dashboard_url"] = dashboard_url(dash_host, dash_port)
             threading.Thread(target=self._dashboard.serve_forever, daemon=True).start()
         self._audio = AudioSocketServer(app, pipeline, pipeline_lock=self._pipeline_lock)
+        self._audio.verify_bind()
         threading.Thread(
             target=self._audio.serve_forever,
             args=(self._stop,),
@@ -80,7 +81,7 @@ class AgentRuntime:
                     if self._stop.is_set():
                         break
                     app.handle_event(event)
-            except AriError:
+            except (AriError, OSError):
                 if self._stop.is_set():
                     return
                 time.sleep(1.0)

@@ -107,7 +107,8 @@ def _reader_loop(
                 if frame.is_pcm and frame.payload:
                     CALL_BUFFER.append_pcm(channel_id, frame.payload)
                     inbound.push(frame)
-                    session.handle_frame(frame)
+                    if session.agent_speaking:
+                        session.handle_frame(frame)
         except FrameError:
             stop.set()
             inbound.close()
@@ -206,6 +207,15 @@ class AudioSocketServer:
     @property
     def address(self) -> tuple[str, int]:
         return self._host, self._port
+
+    def verify_bind(self) -> None:
+        """Fail fast when the listen address is not available."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                probe.bind((self._host, self._port))
+            except OSError as exc:
+                raise AudioSocketError(str(exc)) from exc
 
     def serve_forever(self, stop: StopFlag | None = None) -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
