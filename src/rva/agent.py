@@ -91,6 +91,8 @@ class AgentRuntime:
         if self._dashboard is not None:
             shutdown_server(self._dashboard)
             self._dashboard = None
+        if self._audio is not None:
+            self._audio.close_listener()
 
     def run_until_interrupt(self) -> int:
         if not self._started:

@@ -107,8 +107,6 @@ def _reader_loop(
                 if frame.is_pcm and frame.payload:
                     CALL_BUFFER.append_pcm(channel_id, frame.payload)
                     inbound.push(frame)
-                    if session.agent_speaking:
-                        session.handle_frame(frame)
         except FrameError:
             stop.set()
             inbound.close()
@@ -217,16 +215,28 @@ class AudioSocketServer:
             except OSError as exc:
                 raise AudioSocketError(str(exc)) from exc
 
+    def close_listener(self) -> None:
+        listener = self._listener
+        if listener is None:
+            return
+        try:
+            listener.close()
+        except OSError:
+            pass
+        self._listener = None
+
     def serve_forever(self, stop: StopFlag | None = None) -> None:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
-            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                listener.bind((self._host, self._port))
-            except OSError as exc:
-                raise AudioSocketError(str(exc)) from exc
-            listener.listen(8)
-            listener.settimeout(self._accept_timeout_s)
-            self._listener = listener
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            listener.bind((self._host, self._port))
+        except OSError as exc:
+            listener.close()
+            raise AudioSocketError(str(exc)) from exc
+        listener.listen(8)
+        listener.settimeout(self._accept_timeout_s)
+        self._listener = listener
+        try:
             while stop is None or not stop.is_set():
                 try:
                     conn, _addr = listener.accept()
@@ -240,6 +250,10 @@ class AudioSocketServer:
                     daemon=True,
                 )
                 thread.start()
+        finally:
+            listener.close()
+            if self._listener is listener:
+                self._listener = None
 
     def _handle_client(self, conn: socket.socket) -> None:
         try:

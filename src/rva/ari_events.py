@@ -108,10 +108,11 @@ def _send_ws_pong(sock: socket.socket, payload: bytes) -> None:
     sock.sendall(header + mask + masked)
 
 
-def _read_ws_message(conn: AriWsConnection) -> tuple[int, bytes | None]:
-    """Read one WebSocket frame; return ``(opcode, payload)`` or ``(0x8, None)`` on close."""
+def _read_ws_message(conn: AriWsConnection) -> tuple[int, bytes | None, bool]:
+    """Read one WebSocket frame; returns ``(opcode, payload, fin)`` or ``(0x8, None, True)``."""
     while True:
         hdr = _take(conn, 2)
+        fin = bool(hdr[0] & 0x80)
         opcode = hdr[0] & 0x0F
         masked = bool(hdr[1] & 0x80)
         length = hdr[1] & 0x7F
@@ -124,27 +125,27 @@ def _read_ws_message(conn: AriWsConnection) -> tuple[int, bytes | None]:
         if masked:
             payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
         if opcode == 0x8:
-            return 0x8, None
+            return 0x8, None, True
         if opcode == 0x9:
             _send_ws_pong(conn.sock, payload)
             continue
         if opcode == 0xA:
             continue
-        return opcode, payload
+        return opcode, payload, fin
 
 
 def _read_ws_text(conn: AriWsConnection) -> str | None:
     parts: list[bytes] = []
     while True:
-        opcode, payload = _read_ws_message(conn)
+        opcode, payload, fin = _read_ws_message(conn)
         if opcode == 0x8 or payload is None:
             return None
         if opcode in (0x0, 0x1):
             parts.append(payload)
-            if opcode == 0x1:
+            if fin:
                 return b"".join(parts).decode("utf-8")
             continue
-        return ""
+        parts.clear()
 
 
 def open_ari_events_socket(client: AriClient) -> AriWsConnection:

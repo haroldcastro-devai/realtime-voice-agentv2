@@ -118,6 +118,49 @@ def test_ws_ping_gets_pong() -> None:
     thread.join(timeout=1.0)
 
 
+def test_ws_text_fragment_reassembly() -> None:
+    event = {"type": "StasisStart", "channel": {"id": "frag"}}
+    body = json.dumps(event).encode("utf-8")
+    mid = len(body) // 2
+    ready = threading.Event()
+    port_holder: list[int] = []
+
+    def serve() -> None:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind((_LOOP, 0))
+            sock.listen(1)
+            port_holder.append(sock.getsockname()[1])
+            ready.set()
+            conn, _ = sock.accept()
+            with conn:
+                request = b""
+                while b"\r\n\r\n" not in request:
+                    request += conn.recv(4096)
+                sec_key = b""
+                for line in request.split(b"\r\n"):
+                    if line.lower().startswith(b"sec-websocket-key:"):
+                        sec_key = line.split(b":", 1)[1].strip()
+                accept = _accept_key(sec_key.decode("ascii"))
+                conn.sendall(
+                    (
+                        "HTTP/1.1 101 Switching Protocols\r\n"
+                        f"Sec-WebSocket-Accept: {accept}\r\n"
+                        "\r\n"
+                    ).encode("ascii")
+                )
+                first, second = body[:mid], body[mid:]
+                conn.sendall(bytes([0x01, len(first)]) + first)
+                conn.sendall(bytes([0x80, len(second)]) + second)
+                conn.sendall(bytes([0x88, 0x00]))
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    assert ready.wait(timeout=2.0)
+    client = AriClient(f"http://{_LOOP}:{port_holder[0]}", "u", "p", app="rva")
+    assert list(iter_ari_events(client)) == [event]
+    thread.join(timeout=1.0)
+
+
 def test_open_ari_events_socket_upgrade() -> None:
     ready = threading.Event()
     port_holder: list[int] = []
@@ -145,7 +188,6 @@ def test_open_ari_events_socket_upgrade() -> None:
                         "\r\n"
                     ).encode("ascii")
                 )
-            return
 
     thread = threading.Thread(target=serve, daemon=True)
     thread.start()
