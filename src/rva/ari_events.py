@@ -170,21 +170,26 @@ def open_ari_events_socket(client: AriClient) -> AriWsConnection:
     return AriWsConnection(sock=sock, pending=pending)
 
 
+def iter_events_on_connection(conn: AriWsConnection) -> Iterator[dict[str, object]]:
+    """Yield ARI JSON events from an established WebSocket."""
+    while True:
+        raw = _read_ws_text(conn)
+        if raw is None:
+            break
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+        except JSONDecodeError as exc:
+            raise AriError("ARI event is not JSON") from exc
+        if isinstance(data, dict):
+            yield data
+
+
 def iter_ari_events(client: AriClient) -> Iterator[dict[str, object]]:
     """Yield ARI JSON event objects until the WebSocket closes."""
     conn = open_ari_events_socket(client)
     try:
-        while True:
-            raw = _read_ws_text(conn)
-            if raw is None:
-                break
-            if not raw:
-                continue
-            try:
-                data = json.loads(raw)
-            except JSONDecodeError as exc:
-                raise AriError("ARI event is not JSON") from exc
-            if isinstance(data, dict):
-                yield data
+        yield from iter_events_on_connection(conn)
     finally:
         conn.sock.close()

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import socket
 import threading
 import time
 from http.server import ThreadingHTTPServer
 
 from rva.ari import AriApp, AriClient, AriError
-from rva.ari_events import iter_ari_events
-from rva.audiosocket_server import AudioSocketServer, audiosocket_bind
+from rva.ari_events import iter_events_on_connection, open_ari_events_socket
+from rva.audiosocket_server import AudioSocketError, AudioSocketServer, audiosocket_bind
 from rva.colab import ColabOrchestrator
 from rva.dashboard import dashboard_url, serve_dashboard, shutdown_server
 from rva.pipeline import Pipeline, build_pipeline
@@ -35,6 +36,8 @@ class AgentRuntime:
         self._pipeline_lock = threading.Lock()
         self._dashboard: ThreadingHTTPServer | None = None
         self._audio: AudioSocketServer | None = None
+        self._ari_socket: socket.socket | None = None
+        self._ari_lock = threading.Lock()
 
     def start(self) -> dict[str, object]:
         if self._started:
@@ -60,11 +63,16 @@ class AgentRuntime:
             threading.Thread(target=self._dashboard.serve_forever, daemon=True).start()
         self._audio = AudioSocketServer(app, pipeline, pipeline_lock=self._pipeline_lock)
         self._audio.verify_bind()
-        threading.Thread(
-            target=self._audio.serve_forever,
-            args=(self._stop,),
-            daemon=True,
-        ).start()
+
+        def _serve_audio() -> None:
+            if self._audio is None:
+                return
+            try:
+                self._audio.serve_forever(self._stop)
+            except AudioSocketError:
+                return
+
+        threading.Thread(target=_serve_audio, daemon=True).start()
         threading.Thread(target=self._ari_event_loop, daemon=True).start()
         self._started = True
         self._startup_info = payload
@@ -77,10 +85,19 @@ class AgentRuntime:
             return
         while not self._stop.is_set():
             try:
-                for event in iter_ari_events(client):
-                    if self._stop.is_set():
-                        break
-                    app.handle_event(event)
+                conn = open_ari_events_socket(client)
+                with self._ari_lock:
+                    self._ari_socket = conn.sock
+                try:
+                    for event in iter_events_on_connection(conn):
+                        if self._stop.is_set():
+                            break
+                        app.handle_event(event)
+                finally:
+                    conn.sock.close()
+                    with self._ari_lock:
+                        if self._ari_socket is conn.sock:
+                            self._ari_socket = None
             except (AriError, OSError):
                 if self._stop.is_set():
                     return
@@ -93,6 +110,17 @@ class AgentRuntime:
             self._dashboard = None
         if self._audio is not None:
             self._audio.close_listener()
+        with self._ari_lock:
+            ari_sock = self._ari_socket
+        if ari_sock is not None:
+            try:
+                ari_sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                ari_sock.close()
+            except OSError:
+                pass
 
     def run_until_interrupt(self) -> int:
         if not self._started:
