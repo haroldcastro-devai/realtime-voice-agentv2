@@ -7,8 +7,8 @@ import json
 import sys
 
 from rva.agent import AgentRuntime
-from rva.audiosocket_server import AudioSocketError
 from rva.ari import AriClient, AriError
+from rva.audiosocket_server import AudioSocketError
 from rva.colab import ColabOrchestrator
 from rva.dashboard import (
     DashboardError,

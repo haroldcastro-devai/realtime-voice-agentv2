@@ -29,6 +29,16 @@ def test_start_is_idempotent() -> None:
     client.register.assert_called_once()
 
 
+def test_stop_shuts_down_ari_socket() -> None:
+    import socket
+
+    sock, peer = socket.socketpair()
+    runtime = AgentRuntime(client=MagicMock(), app=MagicMock(), pipeline=MagicMock())
+    runtime._ari_socket = sock
+    runtime.stop()
+    assert peer.recv(1) == b""
+
+
 def test_run_until_interrupt_does_not_restart() -> None:
     runtime = AgentRuntime(client=MagicMock(), app=MagicMock(), pipeline=MagicMock())
     runtime._started = True

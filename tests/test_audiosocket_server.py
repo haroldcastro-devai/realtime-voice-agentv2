@@ -100,6 +100,7 @@ def test_server_accepts_uuid_mapped_call(monkeypatch: pytest.MonkeyPatch) -> Non
         client.sendall(pack_frame(HANGUP))
     stop.set()
     thread.join(timeout=5.0)
+    assert pipeline.stt.calls  # type: ignore[attr-defined]
     assert len(CALL_BUFFER.take_pcm("ch-listen")) > 0
 
 
@@ -134,9 +135,15 @@ def test_run_call_pipeline_turn_twice(monkeypatch: pytest.MonkeyPatch) -> None:
 
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
+    stt = pipeline.stt
     _utterance()
-    time.sleep(0.05)
+    deadline = time.time() + 3.0
+    while len(stt.calls) < 1 and time.time() < deadline:  # type: ignore[attr-defined]
+        time.sleep(0.05)
     _utterance()
+    deadline2 = time.time() + 3.0
+    while len(stt.calls) < 2 and time.time() < deadline2:
+        time.sleep(0.05)
     client.sendall(pack_frame(HANGUP))
     assert done.wait(timeout=5.0)
     client.close()
