@@ -97,13 +97,15 @@ def _take(conn: AriWsConnection, nbytes: int) -> bytes:
 
 def _send_ws_pong(sock: socket.socket, payload: bytes) -> None:
     length = len(payload)
+    mask = os.urandom(4)
+    masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
     if length < 126:
-        header = bytes([0x8A, length])
+        header = bytes([0x8A, 0x80 | length])
     elif length < 65536:
-        header = bytes([0x8A, 126]) + struct.pack("!H", length)
+        header = bytes([0x8A, 0x80 | 126]) + struct.pack("!H", length)
     else:
-        header = bytes([0x8A, 127]) + struct.pack("!Q", length)
-    sock.sendall(header + payload)
+        header = bytes([0x8A, 0x80 | 127]) + struct.pack("!Q", length)
+    sock.sendall(header + mask + masked)
 
 
 def _read_ws_message(conn: AriWsConnection) -> tuple[int, bytes | None]:
@@ -132,12 +134,17 @@ def _read_ws_message(conn: AriWsConnection) -> tuple[int, bytes | None]:
 
 
 def _read_ws_text(conn: AriWsConnection) -> str | None:
-    opcode, payload = _read_ws_message(conn)
-    if opcode == 0x8 or payload is None:
-        return None
-    if opcode != 0x1:
+    parts: list[bytes] = []
+    while True:
+        opcode, payload = _read_ws_message(conn)
+        if opcode == 0x8 or payload is None:
+            return None
+        if opcode in (0x0, 0x1):
+            parts.append(payload)
+            if opcode == 0x1:
+                return b"".join(parts).decode("utf-8")
+            continue
         return ""
-    return payload.decode("utf-8")
 
 
 def open_ari_events_socket(client: AriClient) -> AriWsConnection:

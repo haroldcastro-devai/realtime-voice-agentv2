@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from tests.fakesocket import FakeClock
 
-from rva.ari import DEFAULT_AUDIO_SOCKET_UUID, AriApp
+from rva.ari import AriApp
 from rva.audiosocket import HANGUP, PCM, UUID, pack_frame
 from rva.audiosocket_server import AudioSocketServer, run_audiosocket_call
 from rva.pipeline import build_pipeline
@@ -70,7 +70,9 @@ def test_run_call_buffers_pcm_and_runs_pipeline(monkeypatch: pytest.MonkeyPatch)
     client.close()
     pcm = CALL_BUFFER.take_pcm("ch-tcp")
     assert len(pcm) > 0
-    assert pipeline.stt.calls  # type: ignore[attr-defined]
+    stt = pipeline.stt
+    assert stt.calls  # type: ignore[attr-defined]
+    assert len(clock.sleeps) > 0
 
 
 def test_server_accepts_uuid_mapped_call(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -89,8 +91,12 @@ def test_server_accepts_uuid_mapped_call(monkeypatch: pytest.MonkeyPatch) -> Non
     thread.start()
     time.sleep(0.05)
     with socket.create_connection(("127.0.0.1", port), timeout=2.0) as client:
-        client.sendall(pack_frame(UUID, uuid.UUID(DEFAULT_AUDIO_SOCKET_UUID).bytes))
-        client.sendall(_tone_frame())
+        client.sendall(pack_frame(UUID, uuid.UUID(_AUDIO_UUID).bytes))
+        for _ in range(6):
+            client.sendall(_tone_frame())
+        for _ in range(8):
+            client.sendall(pack_frame(PCM, b"\x00\x00" * 160))
         client.sendall(pack_frame(HANGUP))
     stop.set()
     thread.join(timeout=2.0)
+    assert len(CALL_BUFFER.take_pcm("ch-listen")) > 0

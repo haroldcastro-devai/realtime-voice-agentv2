@@ -102,8 +102,11 @@ def test_ws_ping_gets_pong() -> None:
                 conn.sendall(bytes([0x89, 0x04]) + b"ping")
                 pong_hdr = conn.recv(2)
                 assert pong_hdr[0] & 0x0F == 0xA
+                assert pong_hdr[1] & 0x80
+                mask = conn.recv(4)
                 payload = conn.recv(4)
-                assert payload == b"ping"
+                assert len(mask) == 4
+                assert bytes(b ^ mask[i % 4] for i, b in enumerate(payload)) == b"ping"
                 conn.sendall(bytes([0x88, 0x00]))
 
     thread = threading.Thread(target=serve, daemon=True)
