@@ -9,7 +9,7 @@ import uuid
 from typing import Protocol
 
 from rva.ari import AriApp
-from rva.audiosocket import split_frame
+from rva.audiosocket import FrameError, split_frame
 from rva.inbound_queue import InboundQueue
 from rva.pipeline import Pipeline
 from rva.recordings import CALL_BUFFER
@@ -53,17 +53,22 @@ def _read_until_uuid(sock: socket.socket, timeout_s: float) -> str | None:
             chunk = sock.recv(4096)
         except TimeoutError:
             return None
+        except OSError:
+            return None
         if not chunk:
             return None
         buffer += chunk
-        while True:
-            frame, buffer = split_frame(buffer)
-            if frame is None:
-                break
-            if frame.is_uuid:
-                return str(uuid.UUID(bytes=frame.payload))
-            if frame.is_hangup:
-                return None
+        try:
+            while True:
+                frame, buffer = split_frame(buffer)
+                if frame is None:
+                    break
+                if frame.is_uuid:
+                    return str(uuid.UUID(bytes=frame.payload))
+                if frame.is_hangup:
+                    return None
+        except FrameError:
+            return None
 
 
 def _reader_loop(
@@ -72,31 +77,41 @@ def _reader_loop(
     session: CallSession,
     channel_id: str,
     stop: threading.Event,
+    read_poll_s: float,
 ) -> None:
     buffer = b""
-    sock.settimeout(0.5)
+    sock.settimeout(read_poll_s)
     while not stop.is_set():
         try:
             chunk = sock.recv(4096)
         except TimeoutError:
             continue
         except OSError:
-            break
+            stop.set()
+            inbound.close()
+            return
         if not chunk:
-            break
+            stop.set()
+            inbound.close()
+            return
         buffer += chunk
-        while True:
-            frame, buffer = split_frame(buffer)
-            if frame is None:
-                break
-            if frame.is_hangup:
-                stop.set()
-                inbound.close()
-                return
-            if frame.is_pcm and frame.payload:
-                CALL_BUFFER.append_pcm(channel_id, frame.payload)
-                inbound.push(frame)
-                session.handle_frame(frame)
+        try:
+            while True:
+                frame, buffer = split_frame(buffer)
+                if frame is None:
+                    break
+                if frame.is_hangup:
+                    stop.set()
+                    inbound.close()
+                    return
+                if frame.is_pcm and frame.payload:
+                    CALL_BUFFER.append_pcm(channel_id, frame.payload)
+                    inbound.push(frame)
+                    session.handle_frame(frame)
+        except FrameError:
+            stop.set()
+            inbound.close()
+            return
 
 
 def run_audiosocket_call(
@@ -106,28 +121,40 @@ def run_audiosocket_call(
     pipeline: Pipeline,
     channel_id: str,
     session: CallSession,
-    accept_timeout_s: float = 60.0,
+    read_timeout_s: float = 60.0,
     clock: Clock | None = None,
+    pipeline_lock: threading.Lock | None = None,
 ) -> None:
     """Pipeline + paced TX for one established AudioSocket connection."""
     stop = threading.Event()
     inbound = InboundQueue()
+    poll_s = min(0.5, read_timeout_s)
     reader = threading.Thread(
         target=_reader_loop,
-        args=(sock, inbound, session, channel_id, stop),
+        args=(sock, inbound, session, channel_id, stop, poll_s),
         daemon=True,
     )
     reader.start()
     collector = UtteranceCollector()
     try:
         while not stop.is_set():
-            utterance = _collect_utterance(inbound, collector, stop)
+            utterance = _collect_utterance(inbound, collector, stop, timeout_s=poll_s)
             if stop.is_set():
                 break
             if not utterance:
                 continue
-            turn = pipeline.turn(utterance)
-            session.play_on(turn.tts_pcm, inbound.iter_open(stop), sock, clock=clock)
+            if pipeline_lock is not None:
+                with pipeline_lock:
+                    turn = pipeline.turn(utterance)
+            else:
+                turn = pipeline.turn(utterance)
+            session.play_on(
+                turn.tts_pcm,
+                inbound.iter_open(stop),
+                sock,
+                clock=clock,
+                drain_inbound_after=False,
+            )
     finally:
         stop.set()
         inbound.close()
@@ -138,9 +165,11 @@ def _collect_utterance(
     inbound: InboundQueue,
     collector: UtteranceCollector,
     stop: threading.Event,
+    *,
+    timeout_s: float = 0.1,
 ) -> bytes | None:
     while not stop.is_set():
-        frame = inbound.get(timeout=0.1)
+        frame = inbound.get(timeout=timeout_s)
         if frame is None:
             continue
         if frame.is_pcm and frame.payload:
@@ -161,6 +190,8 @@ class AudioSocketServer:
         host: str | None = None,
         port: int | None = None,
         accept_timeout_s: float = 1.0,
+        call_read_timeout_s: float = 60.0,
+        pipeline_lock: threading.Lock | None = None,
     ) -> None:
         bind_host, bind_port = audiosocket_bind()
         self._host = host if host is not None else bind_host
@@ -168,6 +199,8 @@ class AudioSocketServer:
         self._ari_app = ari_app
         self._pipeline = pipeline
         self._accept_timeout_s = accept_timeout_s
+        self._call_read_timeout_s = call_read_timeout_s
+        self._pipeline_lock = pipeline_lock
         self._listener: socket.socket | None = None
 
     @property
@@ -199,20 +232,25 @@ class AudioSocketServer:
                 thread.start()
 
     def _handle_client(self, conn: socket.socket) -> None:
-        with conn:
-            socket_uuid = _read_until_uuid(conn, timeout_s=60.0)
-            if socket_uuid is None:
-                return
-            channel_id = self._ari_app.channel_for_socket_uuid(socket_uuid)
-            if channel_id is None:
-                return
-            session = self._ari_app.sessions.get(channel_id)
-            if session is None:
-                return
-            run_audiosocket_call(
-                conn,
-                ari_app=self._ari_app,
-                pipeline=self._pipeline,
-                channel_id=channel_id,
-                session=session,
-            )
+        try:
+            with conn:
+                socket_uuid = _read_until_uuid(conn, timeout_s=self._call_read_timeout_s)
+                if socket_uuid is None:
+                    return
+                channel_id = self._ari_app.channel_for_socket_uuid(socket_uuid)
+                if channel_id is None:
+                    return
+                session = self._ari_app.sessions.get(channel_id)
+                if session is None:
+                    return
+                run_audiosocket_call(
+                    conn,
+                    ari_app=self._ari_app,
+                    pipeline=self._pipeline,
+                    channel_id=channel_id,
+                    session=session,
+                    read_timeout_s=self._call_read_timeout_s,
+                    pipeline_lock=self._pipeline_lock,
+                )
+        except OSError:
+            return

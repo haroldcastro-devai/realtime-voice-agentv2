@@ -117,6 +117,20 @@ def test_leftover_speech_after_tts_is_not_barge_in() -> None:
     assert session.agent_speaking is False
 
 
+def test_play_skips_post_drain_when_disabled() -> None:
+    drained: list[int] = []
+
+    def inbound() -> Iterator[Frame]:
+        for idx in (1, 2):
+            drained.append(idx)
+            yield _pcm(_silence_8k())
+
+    session = _session()
+    result = session.play(_tone_8k(), inbound(), drain_inbound_after=False)
+    assert result.completed is True
+    assert drained == [1]
+
+
 def test_empty_pcm_emits_no_frames() -> None:
     session = _session()
     result = session.play(b"", inbound=[])

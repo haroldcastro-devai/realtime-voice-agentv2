@@ -20,3 +20,4 @@ def test_agent_serve_prints_listen_urls() -> None:
     assert code == 0
     runtime.start.assert_called_once()
     runtime.run_until_interrupt.assert_called_once()
+    runtime.run_until_interrupt.assert_called_with()

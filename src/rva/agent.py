@@ -30,10 +30,15 @@ class AgentRuntime:
         self._pipeline = pipeline
         self._with_dashboard = with_dashboard
         self._stop = threading.Event()
+        self._started = False
+        self._startup_info: dict[str, object] = {}
+        self._pipeline_lock = threading.Lock()
         self._dashboard: ThreadingHTTPServer | None = None
         self._audio: AudioSocketServer | None = None
 
     def start(self) -> dict[str, object]:
+        if self._started:
+            return dict(self._startup_info)
         client = self._client if self._client is not None else AriClient.from_env()
         app = self._app if self._app is not None else AriApp(rest=client)
         pipeline = (
@@ -53,13 +58,15 @@ class AgentRuntime:
             dash_host, dash_port = self._dashboard.server_address[:2]
             payload["dashboard_url"] = dashboard_url(dash_host, dash_port)
             threading.Thread(target=self._dashboard.serve_forever, daemon=True).start()
-        self._audio = AudioSocketServer(app, pipeline)
+        self._audio = AudioSocketServer(app, pipeline, pipeline_lock=self._pipeline_lock)
         threading.Thread(
             target=self._audio.serve_forever,
             args=(self._stop,),
             daemon=True,
         ).start()
         threading.Thread(target=self._ari_event_loop, daemon=True).start()
+        self._started = True
+        self._startup_info = payload
         return payload
 
     def _ari_event_loop(self) -> None:
@@ -85,7 +92,8 @@ class AgentRuntime:
             self._dashboard = None
 
     def run_until_interrupt(self) -> int:
-        self.start()
+        if not self._started:
+            self.start()
         try:
             while not self._stop.wait(3600.0):
                 pass
