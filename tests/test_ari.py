@@ -269,6 +269,15 @@ def test_register_redirect_is_rejected() -> None:
         server.server_close()
 
 
+def test_channel_for_socket_uuid_after_stasis_start() -> None:
+    app = AriApp()
+    app.handle_event(_stasis_start("chan-map"))
+    socket_uuid = audiosocket_uuid(_AUDIO_UUID)
+    assert app.channel_for_socket_uuid(socket_uuid) == "chan-map"
+    app.handle_event({"type": "StasisEnd", "channel": {"id": "chan-map"}})
+    assert app.channel_for_socket_uuid(socket_uuid) is None
+
+
 def test_audiosocket_uuid_formats_hex_app_args() -> None:
     assert (
         audiosocket_uuid("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")

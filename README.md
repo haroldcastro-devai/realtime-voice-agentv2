@@ -31,10 +31,9 @@ customer data.
 - HTTPS tunnel how-to ([colab/TUNNEL.md](colab/TUNNEL.md)): ngrok and Cloudflare; tunnel secrets stay in Colab Secrets / local `.env` only
 - Fictional Acme campaign dialer (`rva.dialer`): bundled CSV in `deploy/dialer/acme_campaign.csv`, `+57300000XXXX` only; `rva dialer originate` POSTs ARI `/ari/channels` (fake HTTP in tests)
 - Dialer job states (`rva.dialer_jobs`): `queued` / `running` / `retry` / `done` / `failed`, bounded `RVA_DIALER_MAX_RETRIES`, in-memory or optional sqlite `RVA_DIALER_DB`
-- Local dashboard (`rva.dashboard`): `rva dashboard serve` on `RVA_DASHBOARD_HOST` / `RVA_DASHBOARD_PORT` — active calls, p50/p95, Colab UP/DOWN+RTT, optional live transcript (`RVA_DASHBOARD_TRANSCRIPT=1` via `Pipeline.turn` in the same process; ARI/AudioSocket do not call the pipeline until the full listener lands); transcript lines are global, not per channel; optional loopback token `RVA_DASHBOARD_TOKEN` (open the panel as `/?token=…` — the CLI does not print the secret; query tokens may remain in browser history); set `RVA_RECORD_LATENCY=1` so pipeline samples share the same metrics store in-process
-- Optional post-call recordings (`rva.recordings`): off unless `RVA_RECORDINGS_ENABLE=1`; PCM lands in fictional bucket `acme-ava-recordings-fictional` (override `RVA_MINIO_BUCKET`); loopback `RVA_MINIO_ENDPOINT` / `RVA_RABBITMQ_URL` or in-memory doubles; buffer via `CALL_BUFFER` (AudioSocket hook pending); `rva recordings status`
-
-The full agent TCP listener is a later issue.
+- Local dashboard (`rva.dashboard`): `rva dashboard serve` on `RVA_DASHBOARD_HOST` / `RVA_DASHBOARD_PORT` — active calls, p50/p95, Colab UP/DOWN+RTT, optional live transcript (`RVA_DASHBOARD_TRANSCRIPT=1` via `Pipeline.turn` in the same process); transcript lines are global, not per channel; optional loopback token `RVA_DASHBOARD_TOKEN` (open the panel as `/?token=…` — the CLI does not print the secret; query tokens may remain in browser history); set `RVA_RECORD_LATENCY=1` so pipeline samples share the same metrics store in-process
+- Full agent runtime (`rva.agent`): `rva agent serve` — ARI Stasis over WebSocket, AudioSocket on `RVA_AUDIOSOCKET_HOST` / `RVA_AUDIOSOCKET_PORT`, co-started loopback dashboard, `Pipeline.turn` on utterances, `CallSession.play_on` for TTS with barge-in; inbound PCM fills `CALL_BUFFER` per channel (fake TCP in pytest, not Asterisk in CI)
+- Optional post-call recordings (`rva.recordings`): off unless `RVA_RECORDINGS_ENABLE=1`; PCM lands in fictional bucket `acme-ava-recordings-fictional` (override `RVA_MINIO_BUCKET`); loopback `RVA_MINIO_ENDPOINT` / `RVA_RABBITMQ_URL` or in-memory doubles; buffer via `CALL_BUFFER` on live AudioSocket PCM; `rva recordings status`
 
 ## Setup
 
@@ -65,8 +64,8 @@ python scripts/check_clean.py
 ## Local Asterisk
 
 See [deploy/asterisk/README.md](deploy/asterisk/README.md) and [SMOKE.md](deploy/asterisk/SMOKE.md).
-From `deploy/asterisk`: `docker compose up`, then follow the smoke doc (pjsua or a
-GUI softphone, extension **1000**, listener on `0.0.0.0:8090`).
+From `deploy/asterisk`: `docker compose up`, then `rva agent serve` on the host
+(pjsua or a GUI softphone, extension **1000**, AudioSocket on `0.0.0.0:8090`).
 
 ## Benchmarks
 
