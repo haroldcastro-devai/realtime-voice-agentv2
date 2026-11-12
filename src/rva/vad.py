@@ -64,6 +64,8 @@ class EnergyVad:
             raise ValueError("VAD windows must be hangover>=0 and min_speech>=1")
         if self.config.rms_threshold < 0:
             raise ValueError("RVA_VAD_RMS_THRESHOLD must be >= 0")
+        if self.config.sample_rate != _DEFAULT_RATE:
+            raise ValueError("RVA_VAD_SAMPLE_RATE must be 16000")
         self._voiced_run = 0
         self._hang_left = 0
         self._active = False
