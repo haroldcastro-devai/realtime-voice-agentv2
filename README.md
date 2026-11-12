@@ -16,6 +16,7 @@ customer data.
 - GitHub Actions (`ci`): pytest, ruff, and `scripts/check_clean.py` on Python 3.10 and 3.12
 - [CONTRIBUTING.md](CONTRIBUTING.md): branch/PR/review rules and comment signatures
 - AudioSocket framing (`rva.audiosocket`), band-limited resample (`rva.resample`), energy VAD (`rva.vad`)
+- Call session barge-in (`rva.session`): counted only while the agent is playing
 
 Call-handling, telephony, and measured latency numbers are still later issues.
 

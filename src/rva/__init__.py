@@ -2,7 +2,7 @@
 
 This module is the public import surface. Frame codec: ``rva.audiosocket``.
 Band-limited resample: ``rva.resample``. Energy VAD: ``rva.vad``.
-Call-handling and inference backends land in later issues.
+Call session barge-in: ``rva.session``. Inference backends land in later issues.
 """
 
 __all__ = ["__version__"]
