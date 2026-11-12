@@ -2,12 +2,14 @@
 """Fail if the tree contains employer, carrier, secret, or documentation-IP leaks.
 
 Needles are assembled at runtime so this file does not store brand strings whole.
+Hit messages use opaque rule ids (name, secret, ip), never the raw pattern.
 """
 
 from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -37,6 +39,8 @@ TEXT_SUFFIXES = {
     ".json",
     ".example",
     ".gitignore",
+    ".pem",
+    ".key",
     "",
 }
 
@@ -86,27 +90,61 @@ def _ip_allowed(ip: str) -> bool:
         return True
     if a == 198 and b == 51 and parts[2] == 100:
         return True
-    if a == 203 and b == 113:
+    if a == 203 and b == 0 and parts[2] == 113:
         return True
     return False
 
 
-def _iter_files(root: Path) -> list[Path]:
+def _should_scan(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    if any(part in SKIP_DIR_NAMES or part.endswith(".egg-info") for part in path.parts):
+        return False
+    if path.suffix.lower() in SKIP_SUFFIXES:
+        return False
+    name = path.name
+    if name.startswith(".env") or name.endswith(".env") or ".env." in name:
+        return True
+    if path.suffix.lower() in TEXT_SUFFIXES or name in {".gitignore"}:
+        return True
+    return False
+
+
+def _git_tracked_files(root: Path) -> list[Path] | None:
+    git_dir = root / ".git"
+    if not git_dir.exists():
+        return None
+    result = subprocess.run(
+        ["git", "-c", f"safe.directory={root.as_posix()}", "ls-files", "-z"],
+        cwd=root,
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return None
+    files: list[Path] = []
+    for raw in result.stdout.split(b"\0"):
+        if not raw:
+            continue
+        path = root / raw.decode("utf-8")
+        if _should_scan(path):
+            files.append(path)
+    return files
+
+
+def _walk_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        if any(part in SKIP_DIR_NAMES or part.endswith(".egg-info") for part in path.parts):
-            continue
-        if path.suffix.lower() in SKIP_SUFFIXES:
-            continue
-        if path.suffix.lower() not in TEXT_SUFFIXES and path.name not in {
-            ".gitignore",
-            ".env.example",
-        }:
-            continue
-        files.append(path)
+        if _should_scan(path):
+            files.append(path)
     return files
+
+
+def _iter_files(root: Path) -> list[Path]:
+    tracked = _git_tracked_files(root)
+    if tracked is not None:
+        return tracked
+    return _walk_files(root)
 
 
 def scan(root: Path) -> list[str]:
@@ -119,13 +157,15 @@ def scan(root: Path) -> list[str]:
         rel = path.relative_to(root).as_posix()
         for rx in NAME_RES:
             if rx.search(text):
-                hits.append(f"{rel}: forbidden name/token matching /{rx.pattern}/")
+                hits.append(f"{rel}: rule=name")
+                break
         for rx in SECRET_RES:
             if rx.search(text):
-                hits.append(f"{rel}: secret-like pattern matching /{rx.pattern}/")
+                hits.append(f"{rel}: rule=secret")
+                break
         for ip in IPV4_RE.findall(text):
             if not _ip_allowed(ip):
-                hits.append(f"{rel}: non-documentation IPv4 {ip}")
+                hits.append(f"{rel}: rule=ip {ip}")
     return hits
 
 
