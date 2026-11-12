@@ -37,7 +37,7 @@ CI runs the same gates (`pytest` on 3.10 and 3.12, `ruff`, `check_clean`). A red
 
 ## Review
 
-The author does not approve or merge their own PR. A **code-reviewer** looks at the diff in a **separate session** and leaves comments. Harold Castro reads the diff and gives the **final approval**, then rebase-and-merge.
+The author does not approve or merge their own PR. A **code-reviewer** looks at the diff in a **separate session** and leaves comments. The GitHub review event must be **COMMENT** only (never APPROVE, never REQUEST_CHANGES). Harold Castro reads the diff and gives the **final approval**, then rebase-and-merge.
 
 Do not invent review comments, approvals, or LGTM.
 
@@ -51,7 +51,7 @@ Implementer (PR body and comments):
 — Harold Castro
 ```
 
-Reviewer (GitHub review summary, event COMMENT only — never Approve):
+Reviewer (GitHub review summary, event COMMENT only — never APPROVE, never REQUEST_CHANGES):
 
 ```
 — code-reviewer (separate session). Does not approve or merge. Final approval: Harold Castro.

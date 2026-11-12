@@ -19,6 +19,8 @@ https://devhcastro.atlassian.net/browse/NAT-
 
 - [ ] One Jira issue, one branch, one PR
 - [ ] English title `NAT-<n>: …`
+- [ ] Chat may be Spanish; this PR and comments are English
+- [ ] Jira: To Do → In Progress → In Review → Done (Done only after merge)
 - [ ] Does not approve or merge this PR
 
 ## Notes

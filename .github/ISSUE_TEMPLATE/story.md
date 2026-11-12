@@ -15,6 +15,6 @@ labels: []
 **When**
 **Then**
 
-Work happens on `feat/NAT-<n>-…` with one PR. English only in this issue.
+Work happens on `feat/NAT-<n>-…`. One Jira issue = one branch = one PR. Jira: To Do → In Progress → In Review → Done. Do not merge your own PR. English only in this issue (see CONTRIBUTING.md).
 
 — Harold Castro
