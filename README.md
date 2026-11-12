@@ -13,6 +13,7 @@ customer data.
 - Python 3.10+ package layout (`src/rva`)
 - MIT license
 - Local `pytest` and `ruff` via the `dev` extra
+- GitHub Actions (`ci`): pytest, ruff, and `scripts/check_clean.py` on Python 3.10 and 3.12
 
 Nothing else is implemented yet. Latency numbers will appear only after
 measured runs (see later issues).
@@ -26,8 +27,9 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
-ruff check src tests
-ruff format --check src tests
+ruff check src tests scripts
+ruff format --check src tests scripts
+python scripts/check_clean.py
 ```
 
 Windows (PowerShell):
@@ -37,8 +39,9 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 pytest
-ruff check src tests
-ruff format --check src tests
+ruff check src tests scripts
+ruff format --check src tests scripts
+python scripts/check_clean.py
 ```
 
 ## Roadmap
