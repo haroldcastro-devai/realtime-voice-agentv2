@@ -69,6 +69,32 @@ def test_from_env_reads_rva_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.sample_rate == 16000
 
 
+def test_silence_resets_hang_in_before_min_speech() -> None:
+    vad = EnergyVad(VadConfig(rms_threshold=100.0, min_speech_frames=3, hangover_frames=0))
+    assert not vad.decide(_tone())
+    assert not vad.decide(_tone())
+    assert not vad.decide(_silence())
+    assert not vad.decide(_tone())
+    assert not vad.decide(_tone())
+    assert vad.decide(_tone())
+
+
+def test_energy_vad_reads_rva_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RVA_VAD_RMS_THRESHOLD", "100")
+    monkeypatch.setenv("RVA_VAD_HANGOVER_FRAMES", "0")
+    monkeypatch.setenv("RVA_VAD_MIN_SPEECH_FRAMES", "1")
+    monkeypatch.setenv("RVA_VAD_SAMPLE_RATE", "16000")
+    vad = EnergyVad()
+    assert vad.decide(_tone(rate=16000))
+    vad.reset()
+    assert not vad.decide(_silence())
+
+
 def test_invalid_windows_rejected() -> None:
     with pytest.raises(ValueError, match="windows"):
         EnergyVad(VadConfig(min_speech_frames=0))
+
+
+def test_non_16k_sample_rate_rejected() -> None:
+    with pytest.raises(ValueError, match="16000"):
+        EnergyVad(VadConfig(sample_rate=8000))
