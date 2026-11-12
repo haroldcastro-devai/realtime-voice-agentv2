@@ -15,9 +15,9 @@ customer data.
 - Local `pytest` and `ruff` via the `dev` extra
 - GitHub Actions (`ci`): pytest, ruff, and `scripts/check_clean.py` on Python 3.10 and 3.12
 - [CONTRIBUTING.md](CONTRIBUTING.md): branch/PR/review rules and comment signatures
+- AudioSocket framing (`rva.audiosocket`) and band-limited resample (`rva.resample`)
 
-Nothing else is implemented yet. Latency numbers will appear only after
-measured runs (see later issues).
+Call-handling, telephony, and measured latency numbers are still later issues.
 
 ## Setup
 
