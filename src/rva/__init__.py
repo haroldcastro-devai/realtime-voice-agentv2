@@ -1,7 +1,7 @@
 """Realtime Voice Agent v2 — MIT portfolio package (Acme Telco / Ava).
 
-This module is the public import surface. Call-handling, AudioSocket, and
-inference backends land in later issues; they are not implemented here.
+This module is the public import surface. Frame codec: ``rva.audiosocket``.
+Call-handling and inference backends land in later issues.
 """
 
 __all__ = ["__version__"]

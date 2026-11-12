@@ -67,9 +67,12 @@ def test_trailing_bytes_rejected() -> None:
         parse_frame(raw)
 
 
-def test_uuid_wrong_length_rejected() -> None:
+def test_uuid_wrong_length_rejected_on_pack_and_parse() -> None:
     with pytest.raises(FrameError, match="uuid"):
         pack_frame(UUID, b"\x00" * 15)
+    raw = bytes((UUID, 0x00, 0x0F)) + (b"\x00" * 15)
+    with pytest.raises(FrameError, match="uuid"):
+        parse_frame(raw)
 
 
 def test_unknown_kind_rejected() -> None:
@@ -78,9 +81,30 @@ def test_unknown_kind_rejected() -> None:
         parse_frame(raw)
 
 
-def test_odd_length_pcm_rejected() -> None:
+def test_odd_length_pcm_rejected_on_pack_and_parse() -> None:
     with pytest.raises(FrameError, match="pcm"):
         pack_frame(PCM, b"\x00")
+    raw = bytes((PCM, 0x00, 0x01)) + b"\x00"
+    with pytest.raises(FrameError, match="pcm"):
+        parse_frame(raw)
+
+
+def test_hangup_with_payload_rejected() -> None:
+    raw = bytes((HANGUP, 0x00, 0x01)) + b"\x00"
+    with pytest.raises(FrameError, match="hangup"):
+        parse_frame(raw)
+
+
+def test_empty_pcm_rejected() -> None:
+    raw = bytes((PCM, 0x00, 0x00))
+    with pytest.raises(FrameError, match="pcm"):
+        parse_frame(raw)
+
+
+def test_split_frame_raises_on_complete_illegal_frame() -> None:
+    raw = bytes((UUID, 0x00, 0x0F)) + (b"\x00" * 15)
+    with pytest.raises(FrameError, match="uuid"):
+        split_frame(raw)
 
 
 def test_split_frame_waits_for_complete_payload() -> None:
