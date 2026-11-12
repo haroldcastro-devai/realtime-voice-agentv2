@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Jira NAT board
+    url: https://devhcastro.atlassian.net/jira/software/projects/NAT/boards
+    about: Track work in Jira (NAT). GitHub issues are optional mirrors.

@@ -14,6 +14,7 @@ customer data.
 - MIT license
 - Local `pytest` and `ruff` via the `dev` extra
 - GitHub Actions (`ci`): pytest, ruff, and `scripts/check_clean.py` on Python 3.10 and 3.12
+- [CONTRIBUTING.md](CONTRIBUTING.md): branch/PR/review rules and comment signatures
 
 Nothing else is implemented yet. Latency numbers will appear only after
 measured runs (see later issues).
