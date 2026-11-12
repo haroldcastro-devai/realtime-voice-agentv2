@@ -19,12 +19,26 @@ measured runs (see later issues).
 
 ## Setup
 
+Unix/macOS:
+
 ```bash
 python -m venv .venv
-# Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
 ruff check src tests
+ruff format --check src tests
+```
+
+Windows (PowerShell):
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+pytest
+ruff check src tests
+ruff format --check src tests
 ```
 
 ## Roadmap

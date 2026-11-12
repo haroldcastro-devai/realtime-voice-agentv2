@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "realtime-voice-agentv2"
-version = "0.2.0"
+dynamic = ["version"]
 description = "Portfolio realtime voice agent for phone calls (Acme Telco / Ava)."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,6 +23,9 @@ Repository = "https://github.com/haroldcastro-devai/realtime-voice-agentv2"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "rva.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
