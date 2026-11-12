@@ -26,7 +26,7 @@ _MAX_PAYLOAD = 65_535
 
 
 class FrameError(ValueError):
-    """The buffer is a complete but illegal AudioSocket frame."""
+    """Any AudioSocket framing error: truncated, trailing, or illegal fields."""
 
 
 @dataclass(frozen=True, slots=True)
