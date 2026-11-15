@@ -4,8 +4,8 @@ Barge-in increments only while the agent is playing TTS. User speech in the
 listen phase, or leftover inbound after TTS ends, does not count as barge-in.
 
 ``play()`` interleaves one inbound drain per outbound 20 ms chunk so tests stay
-deterministic. A dedicated inbound reader thread belongs with the TCP server
-(later issue), not this unit model.
+deterministic. Wire paced socket writes through ``rva.tx.PacedTx``. A dedicated
+inbound reader thread belongs with the TCP server (later issue).
 """
 
 from __future__ import annotations
@@ -27,8 +27,7 @@ _FRAME_S16_8K = 320  # 20 ms at 8 kHz
 class PlayResult:
     """Outcome of one ``play()``. ``barge_ins`` is the delta for this call.
 
-    ``packed`` holds AudioSocket PCM frames that the TCP write path (later
-    issue) should send on the socket.
+    ``packed`` holds AudioSocket PCM frames for ``rva.tx.PacedTx``.
     """
 
     completed: bool
