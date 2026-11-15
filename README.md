@@ -17,6 +17,7 @@ customer data.
 - [CONTRIBUTING.md](CONTRIBUTING.md): branch/PR/review rules and comment signatures
 - AudioSocket framing (`rva.audiosocket`), band-limited resample (`rva.resample`), energy VAD (`rva.vad`)
 - Call session barge-in (`rva.session`): counted only while the agent is playing TTS; leftover inbound after playback ends is listen, not barge-in
+- 20 ms AudioSocket TX pacing (`rva.tx`): deadline spacing; tests use a fake clock and fake socket
 
 Call-handling, telephony, and measured latency numbers are still later issues.
 
