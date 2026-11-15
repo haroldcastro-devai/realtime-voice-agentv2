@@ -115,3 +115,11 @@ def test_leftover_speech_after_tts_is_not_barge_in() -> None:
     assert session.barge_ins == 0
     assert result.outbound_frames == 1
     assert session.agent_speaking is False
+
+
+def test_empty_pcm_emits_no_frames() -> None:
+    session = _session()
+    result = session.play(b"", inbound=[])
+    assert result.completed is True
+    assert result.outbound_frames == 0
+    assert result.packed == []
