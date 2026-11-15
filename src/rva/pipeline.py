@@ -1,7 +1,7 @@
 """STT / LLM / TTS protocols, in-process mocks, and an env factory.
 
-A full turn is STT → LLM → TTS with no network. HTTP OpenAI-compatible
-clients are a later issue; this factory only builds ``mock`` backends.
+A full turn is STT → LLM → TTS. ``mock`` backends stay in-process. ``http``
+backends are OpenAI-compatible clients (see ``rva.http_backends``).
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 _MOCK = "mock"
+_HTTP = "http"
 _FRAME_S16_8K = 320  # 20 ms at 8 kHz s16le
 
 
@@ -113,16 +114,28 @@ def _backend_name(env_key: str) -> str:
 def _make_stt(name: str) -> SpeechToText:
     if name == _MOCK:
         return MockStt()
-    raise BackendError(f"{name} STT is not available (use mock; HTTP is a later issue)")
+    if name == _HTTP:
+        from rva.http_backends import HttpStt
+
+        return HttpStt.from_env()
+    raise BackendError(f"{name} STT is not available (use mock or http)")
 
 
 def _make_llm(name: str) -> LanguageModel:
     if name == _MOCK:
         return MockLlm()
-    raise BackendError(f"{name} LLM is not available (use mock; HTTP is a later issue)")
+    if name == _HTTP:
+        from rva.http_backends import HttpLlm
+
+        return HttpLlm.from_env()
+    raise BackendError(f"{name} LLM is not available (use mock or http)")
 
 
 def _make_tts(name: str) -> TextToSpeech:
     if name == _MOCK:
         return MockTts()
-    raise BackendError(f"{name} TTS is not available (use mock; HTTP is a later issue)")
+    if name == _HTTP:
+        from rva.http_backends import HttpTts
+
+        return HttpTts.from_env()
+    raise BackendError(f"{name} TTS is not available (use mock or http)")
