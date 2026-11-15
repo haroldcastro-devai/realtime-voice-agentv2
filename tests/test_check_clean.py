@@ -68,6 +68,16 @@ def test_check_clean_rejects_public_ipv4(tmp_path: Path) -> None:
     assert "rule=ip" in result.stderr
 
 
+def test_check_clean_scans_conf_suffix(tmp_path: Path) -> None:
+    leaked = ".".join(["8", "8", "8", "8"])
+    (tmp_path / "sip.conf").write_text(f"externaddr={leaked}\n", encoding="utf-8")
+    result = _run(tmp_path)
+    assert result.returncode == 1
+    assert leaked in result.stderr
+    assert "rule=ip" in result.stderr
+    assert "sip.conf" in result.stderr
+
+
 def test_check_clean_allows_documentation_ipv4(tmp_path: Path) -> None:
     (tmp_path / "net.md").write_text(
         "bind 192.0.2.10 and 127.0.0.1 and 203.0.113.10",

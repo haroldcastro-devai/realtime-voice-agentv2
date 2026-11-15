@@ -3,12 +3,11 @@
 
 services:
   asterisk:
-    image: andrius/asterisk:20
+    image: andrius/asterisk:20@sha256:75d8c7b2f01d24c8d8d97c23621ecee5a031f6d6c79f635258dd4293c8d46d89
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:5060:5060/udp"
-      - "127.0.0.1:5060:5060/tcp"
       - "127.0.0.1:10000-10020:10000-10020/udp"
     volumes:
       - ./etc:/etc/asterisk:ro
