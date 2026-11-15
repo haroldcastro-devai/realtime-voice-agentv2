@@ -23,7 +23,9 @@ class LanguageModel(Protocol):
 
 
 class TextToSpeech(Protocol):
-    def synthesize(self, text: str) -> bytes: ...
+    def synthesize(self, text: str) -> bytes:
+        """Return mono 8 kHz s16le PCM; length is a multiple of 320 bytes."""
+        ...
 
 
 class BackendError(ValueError):
@@ -32,6 +34,8 @@ class BackendError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class TurnResult:
+    """One pipeline turn. ``tts_pcm`` is mono 8 kHz s16le, length % 320 == 0."""
+
     user_text: str
     agent_text: str
     tts_pcm: bytes
