@@ -4,7 +4,7 @@ Barge-in increments only while the agent is playing TTS. User speech in the
 listen phase, or leftover inbound after TTS ends, does not count as barge-in.
 
 ``play()`` interleaves one inbound drain per outbound 20 ms chunk so tests stay
-deterministic. Wire paced socket writes through ``rva.tx.PacedTx``. A dedicated
+deterministic. Wire paced socket writes through ``play_on`` / ``rva.tx.PacedTx``. A dedicated
 inbound reader thread belongs with the TCP server (later issue).
 """
 
@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from rva.audiosocket import PCM, Frame, pack_frame
 from rva.resample import StreamingResampler
+from rva.tx import Clock, PacedTx, SocketLike
 from rva.vad import EnergyVad
 
 _SOCK_HZ = 8000
@@ -110,6 +111,25 @@ class CallSession:
         finally:
             with self._lock:
                 self._agent_speaking = False
+
+    def play_on(
+        self,
+        outbound_pcm8k: bytes,
+        inbound: Iterable[Frame],
+        sock: SocketLike,
+        clock: Clock | None = None,
+        frame_bytes: int = _FRAME_S16_8K,
+    ) -> PlayResult:
+        """``play()`` then pace packed frames onto ``sock`` (injectable clock).
+
+        Does not pass the barge-in abort into ``PacedTx``: frames already packed
+        before abort still go on the wire at 20 ms. Hangup with empty ``packed``
+        writes nothing. Real TCP belongs to a later issue.
+        """
+        result = self.play(outbound_pcm8k, inbound, frame_bytes=frame_bytes)
+        if result.packed:
+            PacedTx(sock, clock=clock).send_frames(result.packed)
+        return result
 
     def listen(self, inbound: Iterable[Frame]) -> int:
         """Process inbound while the agent is silent. Never counts barge-in."""
