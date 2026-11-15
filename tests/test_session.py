@@ -108,9 +108,7 @@ def test_hangup_during_play_stops_without_barge_in() -> None:
 def test_leftover_speech_after_tts_is_not_barge_in() -> None:
     session = _session()
     outbound = _silence_8k(160)
-    inbound = FakeInbound(
-        [_pcm(_silence_8k()), _pcm(_tone_8k()), _pcm(_tone_8k())]
-    )
+    inbound = FakeInbound([_pcm(_silence_8k()), _pcm(_tone_8k()), _pcm(_tone_8k())])
     result = session.play(outbound, inbound)
     assert result.completed is True
     assert result.barge_ins == 0
