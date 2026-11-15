@@ -1,0 +1,14 @@
+# Local Asterisk for the Acme Telco / Ava demo. No cloud PBX.
+# SIP and RTP are published on 127.0.0.1 only.
+
+services:
+  asterisk:
+    image: andrius/asterisk:20
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:5060:5060/udp"
+      - "127.0.0.1:5060:5060/tcp"
+      - "127.0.0.1:10000-10020:10000-10020/udp"
+    volumes:
+      - ./etc:/etc/asterisk:ro
