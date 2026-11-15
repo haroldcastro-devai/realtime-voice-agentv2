@@ -2,11 +2,24 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from dataclasses import dataclass, field
+
 import numpy as np
 
-from rva.audiosocket import HANGUP, PCM, Frame
-from rva.session import CallSession, FakeInbound
+from rva.audiosocket import HANGUP, PCM, Frame, parse_frame
+from rva.session import CallSession
 from rva.vad import EnergyVad, VadConfig
+
+
+@dataclass
+class FakeInbound:
+    """Synthetic AudioSocket PCM frames for tests (no recordings, no TCP)."""
+
+    frames: list[Frame] = field(default_factory=list)
+
+    def __iter__(self) -> Iterator[Frame]:
+        return iter(self.frames)
 
 
 def _tone_8k(n_samples: int = 160, amp: int = 8000) -> bytes:
@@ -47,6 +60,11 @@ def test_speech_during_play_counts_barge_in_and_stops() -> None:
     assert session.barge_ins == 1
     assert result.outbound_frames < 8
     assert session.agent_speaking is False
+    assert result.packed
+    for blob in result.packed:
+        parsed = parse_frame(blob)
+        assert parsed.kind == PCM
+        assert len(parsed.payload) == 320
 
 
 def test_silence_during_play_does_not_barge_in() -> None:
@@ -57,6 +75,7 @@ def test_silence_during_play_does_not_barge_in() -> None:
     assert result.completed is True
     assert result.barge_ins == 0
     assert result.outbound_frames == 4
+    assert len(result.packed) == 4
 
 
 def test_listen_then_play_only_play_counts() -> None:
@@ -65,7 +84,16 @@ def test_listen_then_play_only_play_counts() -> None:
     assert session.barge_ins == 0
     result = session.play(_silence_8k(160 * 4), FakeInbound([_pcm(_tone_8k())]))
     assert result.completed is False
+    assert result.barge_ins == 1
     assert session.barge_ins == 1
+
+
+def test_play_barge_ins_is_delta_not_lifetime() -> None:
+    session = _session()
+    session.play(_silence_8k(160 * 4), FakeInbound([_pcm(_tone_8k())]))
+    result = session.play(_silence_8k(160 * 4), FakeInbound([_pcm(_tone_8k())]))
+    assert session.barge_ins == 2
+    assert result.barge_ins == 1
 
 
 def test_hangup_during_play_stops_without_barge_in() -> None:
@@ -74,3 +102,18 @@ def test_hangup_during_play_stops_without_barge_in() -> None:
     result = session.play(_silence_8k(160 * 4), inbound)
     assert result.completed is False
     assert result.barge_ins == 0
+    assert result.packed == []
+
+
+def test_leftover_speech_after_tts_is_not_barge_in() -> None:
+    session = _session()
+    outbound = _silence_8k(160)
+    inbound = FakeInbound(
+        [_pcm(_silence_8k()), _pcm(_tone_8k()), _pcm(_tone_8k())]
+    )
+    result = session.play(outbound, inbound)
+    assert result.completed is True
+    assert result.barge_ins == 0
+    assert session.barge_ins == 0
+    assert result.outbound_frames == 1
+    assert session.agent_speaking is False
