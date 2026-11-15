@@ -1,7 +1,11 @@
-"""Call session: concurrent inbound AudioSocket read and barge-in.
+"""Call session: inbound AudioSocket frames and barge-in.
 
 Barge-in increments only while the agent is playing TTS. User speech in the
-listen phase does not abort playback that is not running.
+listen phase, or leftover inbound after TTS ends, does not count as barge-in.
+
+``play()`` interleaves one inbound drain per outbound 20 ms chunk so tests stay
+deterministic. A dedicated inbound reader thread belongs with the TCP server
+(later issue), not this unit model.
 """
 
 from __future__ import annotations
@@ -11,8 +15,8 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 
 from rva.audiosocket import PCM, Frame, pack_frame
-from rva.resample import resample_s16le
-from rva.vad import EnergyVad, VadConfig
+from rva.resample import StreamingResampler
+from rva.vad import EnergyVad
 
 _SOCK_HZ = 8000
 _VAD_HZ = 16000
@@ -21,16 +25,22 @@ _FRAME_S16_8K = 320  # 20 ms at 8 kHz
 
 @dataclass
 class PlayResult:
+    """Outcome of one ``play()``. ``barge_ins`` is the delta for this call.
+
+    ``packed`` holds AudioSocket PCM frames that the TCP write path (later
+    issue) should send on the socket.
+    """
+
     completed: bool
     barge_ins: int
     outbound_frames: int
+    packed: list[bytes] = field(default_factory=list)
 
 
 class CallSession:
     def __init__(self, vad: EnergyVad | None = None) -> None:
-        self.vad = vad or EnergyVad(
-            VadConfig(rms_threshold=100.0, min_speech_frames=1, hangover_frames=0)
-        )
+        self.vad = vad or EnergyVad()
+        self._inbound_rs = StreamingResampler(_SOCK_HZ, _VAD_HZ)
         self._lock = threading.Lock()
         self._agent_speaking = False
         self._abort = threading.Event()
@@ -47,10 +57,12 @@ class CallSession:
             return
         if not frame.is_pcm or not frame.payload:
             return
-        pcm16 = resample_s16le(frame.payload, _SOCK_HZ, _VAD_HZ)
+        pcm16 = self._inbound_rs.process(frame.payload)
         with self._lock:
             speaking = self._agent_speaking
-        if self.vad.decide(pcm16) and speaking:
+        if not speaking:
+            return
+        if self.vad.decide(pcm16):
             with self._lock:
                 self.barge_ins += 1
                 self._agent_speaking = False
@@ -65,10 +77,15 @@ class CallSession:
         """Send outbound PCM while draining inbound frames (interleaved).
 
         Returns ``completed=False`` when barge-in (or hangup) stops playback.
+        ``PlayResult.barge_ins`` is the count for this play only; lifetime
+        total remains on ``CallSession.barge_ins``.
         """
         inbound_iter: Iterator[Frame] = iter(inbound)
-        sent = 0
+        packed: list[bytes] = []
+        before = self.barge_ins
         self._abort.clear()
+        self.vad.reset()
+        self._inbound_rs.reset()
         with self._lock:
             self._agent_speaking = True
         try:
@@ -76,12 +93,21 @@ class CallSession:
                 self._drain_one(inbound_iter)
                 if self._abort.is_set():
                     return PlayResult(
-                        completed=False, barge_ins=self.barge_ins, outbound_frames=sent
+                        completed=False,
+                        barge_ins=self.barge_ins - before,
+                        outbound_frames=len(packed),
+                        packed=packed,
                     )
-                self._emit_pcm(chunk, frame_bytes)
-                sent += 1
+                packed.append(self._emit_pcm(chunk, frame_bytes))
+            with self._lock:
+                self._agent_speaking = False
             self._drain_rest(inbound_iter)
-            return PlayResult(completed=True, barge_ins=self.barge_ins, outbound_frames=sent)
+            return PlayResult(
+                completed=True,
+                barge_ins=self.barge_ins - before,
+                outbound_frames=len(packed),
+                packed=packed,
+            )
         finally:
             with self._lock:
                 self._agent_speaking = False
@@ -117,13 +143,3 @@ def _chunks(pcm: bytes, size: int) -> Iterable[bytes]:
         raise ValueError("frame size must be positive")
     for offset in range(0, max(len(pcm), 1), size):
         yield pcm[offset : offset + size]
-
-
-@dataclass
-class FakeInbound:
-    """Synthetic AudioSocket PCM frames for tests (no recordings, no TCP)."""
-
-    frames: list[Frame] = field(default_factory=list)
-
-    def __iter__(self) -> Iterator[Frame]:
-        return iter(self.frames)

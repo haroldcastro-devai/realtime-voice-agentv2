@@ -67,6 +67,10 @@ class StreamingResampler:
         self._b = firwin(taps, cutoff, fs=fs_up, window="hamming")
         self._zi = lfilter_zi(self._b, [1.0]) * 0.0
 
+    def reset(self) -> None:
+        if self._zi is not None:
+            self._zi = np.zeros_like(self._zi)
+
     def process(self, pcm: bytes) -> bytes:
         if len(pcm) % 2:
             raise ValueError("s16le PCM length must be even")
