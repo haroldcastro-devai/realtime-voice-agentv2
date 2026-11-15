@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import math
+import socket
 import threading
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -62,10 +63,32 @@ class StageMetrics:
         }
 
 
+class _LoopbackServer(ThreadingHTTPServer):
+    """Threading HTTP server with an explicit IPv4 or IPv6 family."""
+
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        request_handler: type[BaseHTTPRequestHandler],
+        family: int,
+    ) -> None:
+        self.address_family = family
+        super().__init__(server_address, request_handler)
+
+
+def _listen_family(host: str) -> int:
+    if host == "::1":
+        return socket.AF_INET6
+    return socket.AF_INET
+
+
 def serve_metrics(
     metrics: StageMetrics, host: str = "127.0.0.1", port: int = 0
 ) -> ThreadingHTTPServer:
-    """Bind ``GET /metrics`` on loopback. ``port=0`` lets the OS pick a free port."""
+    """Bind ``GET /metrics`` on loopback. ``port=0`` lets the OS pick a free port.
+
+    ``::1`` uses IPv6. ``127.0.0.1`` and ``localhost`` use IPv4.
+    """
     if host not in _LOOPBACK:
         raise MetricsError("dashboard metrics API binds loopback only")
 
@@ -85,4 +108,4 @@ def serve_metrics(
             self.end_headers()
             self.wfile.write(body)
 
-    return ThreadingHTTPServer((host, port), Handler)
+    return _LoopbackServer((host, port), Handler, _listen_family(host))

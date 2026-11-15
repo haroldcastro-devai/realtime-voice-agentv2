@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import json
+import socket
+from collections.abc import Iterator
+from contextlib import contextmanager
 from http.client import HTTPConnection
+from http.server import ThreadingHTTPServer
 from threading import Thread
 
 import pytest
 
 from rva.metrics import MetricsError, StageMetrics, percentile_ms, serve_metrics
-from rva.pipeline import MockLlm, MockStt, MockTts, Pipeline
+from rva.pipeline import MockLlm, MockStt, MockTts, Pipeline, TurnResult
 
 _LOOP = "127.0.0.1"
 
@@ -20,6 +24,33 @@ class _Clock:
 
     def __call__(self) -> float:
         return next(self._marks)
+
+
+@contextmanager
+def _running(server: ThreadingHTTPServer) -> Iterator[ThreadingHTTPServer]:
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _get_json(host: str, port: int, path: str = "/metrics") -> tuple[int, object, str]:
+    conn = HTTPConnection(host, port, timeout=2)
+    conn.request("GET", path)
+    resp = conn.getresponse()
+    raw = resp.read()
+    ctype = resp.getheader("Content-Type") or ""
+    status = resp.status
+    conn.close()
+    body: object
+    if "json" in ctype:
+        body = json.loads(raw)
+    else:
+        body = raw
+    return status, body, ctype
 
 
 def test_percentile_nearest_rank_and_empty() -> None:
@@ -63,7 +94,24 @@ def test_rejects_unknown_stage_and_bad_duration() -> None:
     with pytest.raises(MetricsError, match="finite"):
         store.record("stt", float("nan"))
     with pytest.raises(MetricsError, match="finite"):
+        store.record("stt", float("inf"))
+    with pytest.raises(MetricsError, match="finite"):
+        store.record("stt", float("-inf"))
+    with pytest.raises(MetricsError, match="finite"):
         store.record("stt", -0.1)
+
+
+def test_pipeline_turn_without_metrics_still_fills_durations() -> None:
+    clock = _Clock([1.0, 1.004, 1.014, 1.034])
+    pcm = b"\x00\x00" * 160
+    pipe = Pipeline(MockStt("hello"), MockLlm(), MockTts(), clock=clock)
+    assert pipe.metrics is None
+    result = pipe.turn(pcm)
+    assert isinstance(result, TurnResult)
+    assert result.stt_s == pytest.approx(0.004)
+    assert result.llm_s == pytest.approx(0.010)
+    assert result.tts_s == pytest.approx(0.020)
+    assert result.total_s == pytest.approx(0.034)
 
 
 def test_pipeline_turn_records_four_stages_without_pii() -> None:
@@ -101,31 +149,58 @@ def test_metrics_http_json_on_loopback() -> None:
     store.record("tts", 0.008)
     store.record("total", 0.040)
     server = serve_metrics(store, host=_LOOP, port=0)
-    thread = Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        conn = HTTPConnection(_LOOP, server.server_address[1], timeout=2)
-        conn.request("GET", "/metrics")
-        resp = conn.getresponse()
-        raw = resp.read()
-        conn.close()
-        assert resp.status == 200
-        assert "json" in resp.getheader("Content-Type", "")
-        body = json.loads(raw)
+    with _running(server):
+        port = server.server_address[1]
+        status, body, ctype = _get_json(_LOOP, port)
+        assert status == 200
+        assert "json" in ctype
+        assert isinstance(body, dict)
         assert body["stt"]["n"] == 2
         assert body["stt"]["p50"] == pytest.approx(4.0)
         assert body["stt"]["p95"] == pytest.approx(12.0)
         assert body["total"]["p50"] == pytest.approx(40.0)
         assert "user_text" not in json.dumps(body)
-        conn = HTTPConnection(_LOOP, server.server_address[1], timeout=2)
-        conn.request("GET", "/secret")
-        missing = conn.getresponse()
-        missing.read()
-        conn.close()
-        assert missing.status == 404
-    finally:
-        server.shutdown()
-        server.server_close()
+        missing, _, _ = _get_json(_LOOP, port, "/secret")
+        assert missing == 404
+
+
+def test_metrics_http_empty_store_json_nulls() -> None:
+    server = serve_metrics(StageMetrics(), host=_LOOP, port=0)
+    with _running(server):
+        status, body, _ = _get_json(_LOOP, server.server_address[1])
+        assert status == 200
+        assert isinstance(body, dict)
+        for stage in ("stt", "llm", "tts", "total"):
+            assert body[stage]["n"] == 0
+            assert body[stage]["p50"] is None
+            assert body[stage]["p95"] is None
+        raw = json.dumps(body)
+        assert "null" in raw
+
+
+def test_metrics_http_binds_ipv6_loopback() -> None:
+    store = StageMetrics()
+    store.record("total", 0.005)
+    server = serve_metrics(store, host="::1", port=0)
+    assert server.address_family == socket.AF_INET6
+    with _running(server):
+        port = server.server_address[1]
+        status, body, _ = _get_json("::1", port)
+        assert status == 200
+        assert isinstance(body, dict)
+        assert body["total"]["n"] == 1
+        assert body["total"]["p50"] == pytest.approx(5.0)
+
+
+def test_metrics_http_binds_localhost_ipv4() -> None:
+    server = serve_metrics(StageMetrics(), host="localhost", port=0)
+    assert server.address_family == socket.AF_INET
+    with _running(server):
+        status, body, _ = _get_json("127.0.0.1", server.server_address[1])
+        assert status == 200
+        assert isinstance(body, dict)
+        assert body["stt"]["n"] == 0
+        assert body["stt"]["p50"] is None
 
 
 def test_metrics_server_rejects_non_loopback() -> None:

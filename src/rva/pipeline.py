@@ -47,10 +47,10 @@ class TurnResult:
     user_text: str
     agent_text: str
     tts_pcm: bytes
-    stt_s: float | None = None
-    llm_s: float | None = None
-    tts_s: float | None = None
-    total_s: float | None = None
+    stt_s: float
+    llm_s: float
+    tts_s: float
+    total_s: float
 
 
 class MockStt:
