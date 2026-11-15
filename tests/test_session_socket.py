@@ -33,15 +33,20 @@ def test_play_on_barge_in_writes_only_packed_prefix() -> None:
     session = _session()
     clock = FakeClock()
     sock = FakeSocket(clock)
-    inbound = FakeInbound([_pcm(_silence_8k()), _pcm(_tone_8k()), _pcm(_tone_8k())])
+    inbound = FakeInbound([_pcm(_silence_8k()), _pcm(_silence_8k()), _pcm(_tone_8k())])
     result = session.play_on(_silence_8k(160 * 8), inbound, sock, clock=clock)
     assert result.completed is False
     assert result.barge_ins == 1
-    assert 0 < len(sock.writes) == result.outbound_frames < 8
+    assert result.outbound_frames == len(sock.writes) == 2
+    assert [blob for _, blob in sock.writes] == result.packed
     times = [t for t, _ in sock.writes]
-    if len(times) >= 2:
-        gaps = [b - a for a, b in zip(times, times[1:])]
-        assert gaps == pytest.approx([FRAME_PERIOD_S] * (len(times) - 1))
+    assert times == pytest.approx([0.0, FRAME_PERIOD_S])
+    gaps = [b - a for a, b in zip(times, times[1:])]
+    assert gaps == pytest.approx([FRAME_PERIOD_S])
+    for blob in result.packed:
+        parsed = parse_frame(blob)
+        assert parsed.kind == PCM
+        assert len(parsed.payload) == FRAME_S16_8K
 
 
 def test_play_on_hangup_writes_nothing() -> None:
