@@ -7,8 +7,12 @@ backends are OpenAI-compatible clients (see ``rva.http_backends``).
 from __future__ import annotations
 
 import os
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
+
+from rva.metrics import StageMetrics
 
 _MOCK = "mock"
 _HTTP = "http"
@@ -35,11 +39,18 @@ class BackendError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class TurnResult:
-    """One pipeline turn. ``tts_pcm`` is mono 8 kHz s16le, length % 320 == 0."""
+    """One pipeline turn. ``tts_pcm`` is mono 8 kHz s16le, length % 320 == 0.
+
+    Stage durations are seconds for this turn (always filled).
+    """
 
     user_text: str
     agent_text: str
     tts_pcm: bytes
+    stt_s: float | None = None
+    llm_s: float | None = None
+    tts_s: float | None = None
+    total_s: float | None = None
 
 
 class MockStt:
@@ -83,24 +94,56 @@ class MockTts:
 
 
 class Pipeline:
-    def __init__(self, stt: SpeechToText, llm: LanguageModel, tts: TextToSpeech) -> None:
+    def __init__(
+        self,
+        stt: SpeechToText,
+        llm: LanguageModel,
+        tts: TextToSpeech,
+        metrics: StageMetrics | None = None,
+        clock: Callable[[], float] = time.perf_counter,
+    ) -> None:
         self.stt = stt
         self.llm = llm
         self.tts = tts
+        self.metrics = metrics
+        self._clock = clock
 
     def turn(self, pcm: bytes, sample_rate: int = 16_000) -> TurnResult:
+        t0 = self._clock()
         user_text = self.stt.transcribe(pcm, sample_rate)
+        t1 = self._clock()
         agent_text = self.llm.complete(user_text)
+        t2 = self._clock()
         tts_pcm = self.tts.synthesize(agent_text)
-        return TurnResult(user_text=user_text, agent_text=agent_text, tts_pcm=tts_pcm)
+        t3 = self._clock()
+        stt_s, llm_s, tts_s, total_s = t1 - t0, t2 - t1, t3 - t2, t3 - t0
+        if self.metrics is not None:
+            self.metrics.record("stt", stt_s)
+            self.metrics.record("llm", llm_s)
+            self.metrics.record("tts", tts_s)
+            self.metrics.record("total", total_s)
+        return TurnResult(
+            user_text=user_text,
+            agent_text=agent_text,
+            tts_pcm=tts_pcm,
+            stt_s=stt_s,
+            llm_s=llm_s,
+            tts_s=tts_s,
+            total_s=total_s,
+        )
 
 
-def build_pipeline() -> Pipeline:
-    """Wire backends from ``RVA_*_BACKEND`` (default ``mock``)."""
+def build_pipeline(metrics: StageMetrics | None = None) -> Pipeline:
+    """Wire backends from ``RVA_*_BACKEND`` (default ``mock``).
+
+    When ``metrics`` is omitted, timings still land on ``TurnResult`` but are
+    not stored. Pass a ``StageMetrics`` for the dashboard API.
+    """
     return Pipeline(
         stt=_make_stt(_backend_name("RVA_STT_BACKEND")),
         llm=_make_llm(_backend_name("RVA_LLM_BACKEND")),
         tts=_make_tts(_backend_name("RVA_TTS_BACKEND")),
+        metrics=metrics,
     )
 
 
