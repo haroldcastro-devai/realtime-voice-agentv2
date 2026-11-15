@@ -140,5 +140,5 @@ class CallSession:
 def _chunks(pcm: bytes, size: int) -> Iterable[bytes]:
     if size <= 0:
         raise ValueError("frame size must be positive")
-    for offset in range(0, max(len(pcm), 1), size):
+    for offset in range(0, len(pcm), size):
         yield pcm[offset : offset + size]

@@ -16,6 +16,7 @@ from rva.audiosocket import PCM, pack_frame
 
 FRAME_PERIOD_S = 0.020
 FRAME_S16_8K = 320  # 20 ms at 8 kHz s16le
+ABORT_POLL_S = 0.005  # interruptible wait while abort is armed
 
 
 class SocketLike(Protocol):
@@ -60,7 +61,8 @@ class PacedTx:
         """Chunk 8 kHz s16le PCM, pack, and write on 20 ms deadlines.
 
         Returns the number of frames written. Stops before a write if ``abort``
-        is set. After each write, sleeps until the next slot unless aborted.
+        is set. After each write, waits until the next slot unless aborted.
+        A late write re-anchors the schedule so later gaps stay one period.
         """
         return self.send_frames(_pack_pcm_chunks(pcm, frame_bytes))
 
@@ -69,17 +71,36 @@ class PacedTx:
         written = 0
         t0 = self._clock.monotonic()
         for index, blob in enumerate(frames):
-            if self._abort is not None and self._abort.is_set():
+            if self._aborted():
                 break
             self._sock.sendall(blob)
             written += 1
-            if self._abort is not None and self._abort.is_set():
+            if self._aborted():
                 break
+            now = self._clock.monotonic()
             deadline = t0 + (index + 1) * self._period_s
-            remaining = deadline - self._clock.monotonic()
-            if remaining > 0:
-                self._clock.sleep(remaining)
+            remaining = deadline - now
+            if remaining <= 0:
+                t0 = now - (index + 1) * self._period_s
+                continue
+            self._wait_until(deadline)
         return written
+
+    def _aborted(self) -> bool:
+        return self._abort is not None and self._abort.is_set()
+
+    def _wait_until(self, deadline: float) -> None:
+        abort = self._abort
+        while True:
+            remaining = deadline - self._clock.monotonic()
+            if remaining <= 0:
+                return
+            if abort is not None and abort.is_set():
+                return
+            if abort is None:
+                self._clock.sleep(remaining)
+                return
+            self._clock.sleep(min(remaining, ABORT_POLL_S))
 
 
 def _pack_pcm_chunks(pcm: bytes, frame_bytes: int) -> list[bytes]:
@@ -88,8 +109,7 @@ def _pack_pcm_chunks(pcm: bytes, frame_bytes: int) -> list[bytes]:
     if len(pcm) % 2:
         raise ValueError("s16le PCM length must be even")
     packed: list[bytes] = []
-    span = max(len(pcm), 1)
-    for offset in range(0, span, frame_bytes):
+    for offset in range(0, len(pcm), frame_bytes):
         chunk = pcm[offset : offset + frame_bytes]
         if len(chunk) < frame_bytes:
             chunk = chunk + b"\x00" * (frame_bytes - len(chunk))
