@@ -38,6 +38,7 @@ TEXT_SUFFIXES = {
     ".ini",
     ".json",
     ".example",
+    ".conf",
     ".gitignore",
     ".pem",
     ".key",
