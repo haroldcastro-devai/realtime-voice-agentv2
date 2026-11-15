@@ -21,8 +21,9 @@ customer data.
 - Session fake-socket tests: barge-in, hangup, and 20 ms pacing without Asterisk (`CallSession.play_on`)
 - STT/LLM/TTS protocols, mocks, and factory (`rva.pipeline`): one mocked turn in pytest with no network
 - OpenAI-compatible HTTP STT/LLM/TTS (`rva.http_backends`): mapping tests use a local fake server
+- Per-stage p50/p95 (`rva.metrics`): in-memory STT/LLM/TTS/total samples; `GET /metrics` on loopback JSON (no transcripts)
 
-Call-handling, telephony, and measured latency numbers are still later issues.
+Call-handling, telephony, and measured latency numbers are still later issues. The dashboard UI is a later issue; this repo already exposes the metrics JSON.
 
 ## Setup
 
