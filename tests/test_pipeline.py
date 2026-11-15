@@ -68,12 +68,28 @@ def test_factory_reads_rva_backend_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize("env_key", _BACKEND_KEYS)
-@pytest.mark.parametrize("name", ["http", "whisper"])
-def test_factory_rejects_unknown_and_http_names(
-    monkeypatch: pytest.MonkeyPatch, env_key: str, name: str
+def test_factory_rejects_unknown_names(monkeypatch: pytest.MonkeyPatch, env_key: str) -> None:
+    for key in _BACKEND_KEYS:
+        monkeypatch.setenv(key, "mock")
+    monkeypatch.setenv(env_key, "whisper")
+    with pytest.raises(BackendError, match="not available"):
+        build_pipeline()
+
+
+@pytest.mark.parametrize(
+    "env_key,url_key",
+    [
+        ("RVA_STT_BACKEND", "RVA_STT_URL"),
+        ("RVA_LLM_BACKEND", "RVA_LLM_URL"),
+        ("RVA_TTS_BACKEND", "RVA_TTS_URL"),
+    ],
+)
+def test_factory_http_requires_url(
+    monkeypatch: pytest.MonkeyPatch, env_key: str, url_key: str
 ) -> None:
     for key in _BACKEND_KEYS:
         monkeypatch.setenv(key, "mock")
-    monkeypatch.setenv(env_key, name)
-    with pytest.raises(BackendError, match="later issue"):
+    monkeypatch.setenv(env_key, "http")
+    monkeypatch.delenv(url_key, raising=False)
+    with pytest.raises(BackendError, match=url_key):
         build_pipeline()
