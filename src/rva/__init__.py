@@ -4,7 +4,8 @@ This module is the public import surface. Frame codec: ``rva.audiosocket``.
 Band-limited resample: ``rva.resample``. Energy VAD: ``rva.vad``.
 Call session barge-in: ``rva.session``. 20 ms TX pacing: ``rva.tx``.
 STT/LLM/TTS mocks and factory: ``rva.pipeline``. OpenAI-compatible HTTP clients:
-``rva.http_backends``. Per-stage p50/p95 samples: ``rva.metrics``.
+``rva.http_backends``. Per-stage p50/p95 samples: ``rva.metrics``. Sentence TTS
+prefetch: ``rva.prefetch``.
 """
 
 __all__ = ["__version__"]

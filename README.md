@@ -22,6 +22,7 @@ customer data.
 - STT/LLM/TTS protocols, mocks, and factory (`rva.pipeline`): one mocked turn in pytest with no network
 - OpenAI-compatible HTTP STT/LLM/TTS (`rva.http_backends`): mapping tests use a local fake server
 - Per-stage p50/p95 (`rva.metrics`): in-memory STT/LLM/TTS/total samples; `GET /metrics` on loopback JSON (no transcripts)
+- Sentence TTS prefetch (`rva.prefetch`): synthesize sentence N+1 while N plays; heard order is unchanged
 
 Call-handling, telephony, and measured latency numbers are still later issues. The dashboard UI is a later issue; this repo already exposes the metrics JSON.
 
