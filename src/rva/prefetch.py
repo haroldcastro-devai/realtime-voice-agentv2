@@ -47,8 +47,10 @@ def speak_prefetched(
             nxt = None
             if index + 1 < len(sentences):
                 nxt = pool.submit(tts.synthesize, sentences[index + 1])
-            play(current)
-            heard.append(current)
-            if nxt is not None:
-                current = nxt.result()
+            try:
+                play(current)
+                heard.append(current)
+            finally:
+                if nxt is not None:
+                    current = nxt.result()
     return heard
