@@ -4,14 +4,20 @@ from __future__ import annotations
 
 import json
 import os
+import struct
 import uuid
+from json import JSONDecodeError
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from rva.pipeline import BackendError
+from rva.resample import resample_s16le
 
 _FRAME_S16_8K = 320
 _JSON = "application/json"
+_OPENAI_TTS_PCM_HZ = 24_000
+_SOCK_HZ = 8_000
+_ERR_BODY_MAX = 200
 
 
 def _env(name: str) -> str | None:
@@ -25,7 +31,13 @@ def _timeout() -> float:
     raw = _env("RVA_HTTP_TIMEOUT")
     if raw is None:
         return 10.0
-    return float(raw)
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise BackendError("RVA_HTTP_TIMEOUT must be a number") from exc
+    if value <= 0:
+        raise BackendError("RVA_HTTP_TIMEOUT must be a number")
+    return value
 
 
 def _require_url(env_key: str) -> str:
@@ -35,8 +47,16 @@ def _require_url(env_key: str) -> str:
     return url.rstrip("/")
 
 
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        raise BackendError(f"HTTP {code} redirect rejected")
+
+
+_OPENER = build_opener(_NoRedirect)
+
+
 class HttpStt:
-    """POST ``/v1/audio/transcriptions`` (multipart file)."""
+    """POST ``/v1/audio/transcriptions`` (WAV file + sample rate in the header)."""
 
     def __init__(self, base_url: str, token: str | None = None, model: str = "rva-stt") -> None:
         self.base_url = base_url.rstrip("/")
@@ -52,11 +72,11 @@ class HttpStt:
         )
 
     def transcribe(self, pcm: bytes, sample_rate: int = 16_000) -> str:
+        wav = _pcm16_wav(pcm, sample_rate)
         boundary = "----rva" + uuid.uuid4().hex
-        filename = "audio.raw"
         parts = [
             _form_field(boundary, "model", self.model),
-            _form_file(boundary, "file", filename, pcm, "application/octet-stream"),
+            _form_file(boundary, "file", "audio.wav", wav, "audio/wav"),
         ]
         body = b"".join(parts) + f"--{boundary}--\r\n".encode()
         payload = _request(
@@ -65,7 +85,10 @@ class HttpStt:
             f"multipart/form-data; boundary={boundary}",
             self.token,
         )
-        text = json.loads(payload.decode()).get("text")
+        data = _load_json(payload)
+        if not isinstance(data, dict):
+            raise BackendError("STT response missing text")
+        text = data.get("text")
         if not isinstance(text, str):
             raise BackendError("STT response missing text")
         return text
@@ -95,7 +118,7 @@ class HttpLlm:
             }
         ).encode()
         payload = _request(f"{self.base_url}/v1/chat/completions", body, _JSON, self.token)
-        data = json.loads(payload.decode())
+        data = _load_json(payload)
         try:
             content = data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
@@ -106,7 +129,7 @@ class HttpLlm:
 
 
 class HttpTts:
-    """POST ``/v1/audio/speech``; body is 8 kHz s16le (padded to 20 ms frames)."""
+    """POST ``/v1/audio/speech``. OpenAI ``pcm`` is 24 kHz; we resample to 8 kHz."""
 
     def __init__(self, base_url: str, token: str | None = None, model: str = "rva-tts") -> None:
         self.base_url = base_url.rstrip("/")
@@ -130,15 +153,41 @@ class HttpTts:
                 "response_format": "pcm",
             }
         ).encode()
-        pcm = _request(f"{self.base_url}/v1/audio/speech", body, _JSON, self.token)
-        if len(pcm) % 2:
-            pcm = pcm + b"\x00"
-        extra = len(pcm) % _FRAME_S16_8K
+        pcm24 = _request(f"{self.base_url}/v1/audio/speech", body, _JSON, self.token)
+        if len(pcm24) % 2:
+            pcm24 = pcm24 + b"\x00"
+        pcm8 = resample_s16le(pcm24, _OPENAI_TTS_PCM_HZ, _SOCK_HZ)
+        extra = len(pcm8) % _FRAME_S16_8K
         if extra:
-            pcm = pcm + b"\x00" * (_FRAME_S16_8K - extra)
-        if not pcm:
-            pcm = b"\x00" * _FRAME_S16_8K
-        return pcm
+            pcm8 = pcm8 + b"\x00" * (_FRAME_S16_8K - extra)
+        if not pcm8:
+            pcm8 = b"\x00" * _FRAME_S16_8K
+        return pcm8
+
+
+def _pcm16_wav(pcm: bytes, sample_rate: int) -> bytes:
+    if sample_rate <= 0:
+        raise BackendError("sample_rate must be positive")
+    if len(pcm) % 2:
+        pcm = pcm + b"\x00"
+    data_len = len(pcm)
+    return (
+        b"RIFF"
+        + struct.pack("<I", 36 + data_len)
+        + b"WAVE"
+        + b"fmt "
+        + struct.pack("<IHHIIHH", 16, 1, 1, sample_rate, sample_rate * 2, 2, 16)
+        + b"data"
+        + struct.pack("<I", data_len)
+        + pcm
+    )
+
+
+def _load_json(payload: bytes) -> object:
+    try:
+        return json.loads(payload.decode("utf-8"))
+    except (JSONDecodeError, UnicodeDecodeError) as exc:
+        raise BackendError("HTTP JSON response is invalid") from exc
 
 
 def _form_field(boundary: str, name: str, value: str) -> bytes:
@@ -162,9 +211,12 @@ def _request(url: str, body: bytes, content_type: str, token: str | None) -> byt
         headers["Authorization"] = f"Bearer {token}"
     req = Request(url, data=body, headers=headers, method="POST")
     try:
-        with urlopen(req, timeout=_timeout()) as resp:
+        with _OPENER.open(req, timeout=_timeout()) as resp:
             return resp.read()
     except HTTPError as exc:
-        raise BackendError(f"HTTP {exc.code} from {url}") from exc
+        snippet = exc.read()[:_ERR_BODY_MAX]
+        raise BackendError(f"HTTP {exc.code} from {url}: {snippet!r}") from exc
+    except TimeoutError as exc:
+        raise BackendError(f"HTTP timeout from {url}") from exc
     except URLError as exc:
         raise BackendError(f"HTTP client failed: {exc.reason}") from exc
