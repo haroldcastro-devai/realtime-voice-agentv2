@@ -57,7 +57,7 @@ python scripts/check_clean.py
 
 See [deploy/asterisk/README.md](deploy/asterisk/README.md). From that directory:
 `docker compose up`, register a softphone as `ava` / `rva-demo` at `127.0.0.1`,
-dial **1000**. The container reaches the agent at `host.docker.internal:8090`.
+dial **1000**. Listen on `0.0.0.0:8090`; the container uses `host.docker.internal:8090`.
 
 ## Roadmap
 
