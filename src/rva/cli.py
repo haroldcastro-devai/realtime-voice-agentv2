@@ -20,6 +20,7 @@ from rva.dialer import (
     load_acme_campaign,
     run_acme_campaign_jobs,
 )
+from rva.recordings import RecordingArchive, minio_bucket_name, recordings_enabled
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -46,6 +47,10 @@ def main(argv: list[str] | None = None) -> int:
     colab_sub = colab.add_subparsers(dest="colab_cmd", required=True)
     status = colab_sub.add_parser("status", help="Health, RTT, backoff, and fallback flags")
     status.set_defaults(handler=_colab_status)
+    recordings = sub.add_parser("recordings", help="Optional MinIO/RabbitMQ archive flags")
+    rec_sub = recordings.add_subparsers(dest="recordings_cmd", required=True)
+    rec_status = rec_sub.add_parser("status", help="Show whether post-call archive is enabled")
+    rec_status.set_defaults(handler=_recordings_status)
     args = parser.parse_args(argv)
     return int(args.handler(args))
 
@@ -110,6 +115,18 @@ def _dashboard_serve(_args: argparse.Namespace) -> int:
         from rva.dashboard import shutdown_server
 
         shutdown_server(server)
+    return 0
+
+
+def _recordings_status(_args: argparse.Namespace) -> int:
+    archive = RecordingArchive.shared()
+    payload = {
+        "enabled": recordings_enabled(),
+        "bucket": minio_bucket_name(),
+        "archive_active": archive.enabled,
+    }
+    json.dump(payload, sys.stdout, indent=2)
+    sys.stdout.write("\n")
     return 0
 
 

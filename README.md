@@ -32,6 +32,7 @@ customer data.
 - Fictional Acme campaign dialer (`rva.dialer`): bundled CSV in `deploy/dialer/acme_campaign.csv`, `+57300000XXXX` only; `rva dialer originate` POSTs ARI `/ari/channels` (fake HTTP in tests)
 - Dialer job states (`rva.dialer_jobs`): `queued` / `running` / `retry` / `done` / `failed`, bounded `RVA_DIALER_MAX_RETRIES`, in-memory or optional sqlite `RVA_DIALER_DB`
 - Local dashboard (`rva.dashboard`): `rva dashboard serve` on `RVA_DASHBOARD_HOST` / `RVA_DASHBOARD_PORT` — active calls, p50/p95, Colab UP/DOWN+RTT, optional live transcript (`RVA_DASHBOARD_TRANSCRIPT=1` via `Pipeline.turn` in the same process; ARI/AudioSocket do not call the pipeline until the full listener lands); transcript lines are global, not per channel; optional loopback token `RVA_DASHBOARD_TOKEN` (open the panel as `/?token=…` — the CLI does not print the secret; query tokens may remain in browser history); set `RVA_RECORD_LATENCY=1` so pipeline samples share the same metrics store in-process
+- Optional post-call recordings (`rva.recordings`): off unless `RVA_RECORDINGS_ENABLE=1`; PCM lands in fictional bucket `acme-ava-recordings-fictional` (override `RVA_MINIO_BUCKET`); RabbitMQ JSON notice (in-memory double in pytest); `rva recordings status`
 
 The full agent TCP listener is a later issue.
 
@@ -103,8 +104,7 @@ Short portfolio demo narration: [docs/DEMO_VIDEO_SCRIPT.md](docs/DEMO_VIDEO_SCRI
 
 ## Roadmap
 
-Optional RabbitMQ + MinIO recordings (NAT-36).
-Tracked in Jira project NAT.
+Epics E0–E8 are implemented in-tree; see Jira project NAT for optional follow-ups.
 
 ## License
 
