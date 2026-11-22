@@ -37,6 +37,11 @@ def _server(store: _Store, *, info: str = "ok") -> ThreadingHTTPServer:
                 if info == "gone":
                     self._raw(404, b'{"error":"no"}', "application/json")
                     return
+                if info == "redirect":
+                    self.send_response(302)
+                    self.send_header("Location", "/elsewhere")
+                    self.end_headers()
+                    return
                 if info == "badjson":
                     self._raw(200, b"{not-json", "application/json")
                     return
@@ -85,15 +90,29 @@ def test_stasis_start_creates_call_session_and_continues() -> None:
     session = app.handle_event(_stasis_start("chan-ava"))
     assert isinstance(session, CallSession)
     assert app.sessions["chan-ava"] is session
+    assert app.by_uuid[_AUDIO_UUID] is session
     assert posts == [("chan-ava", "audiosocket", "s")]
     app.handle_event({"type": "StasisEnd", "channel": {"id": "chan-ava"}})
     assert "chan-ava" not in app.sessions
+    assert _AUDIO_UUID not in app.by_uuid
 
 
 def test_unknown_event_is_ignored() -> None:
     app = AriApp()
     assert app.handle_event({"type": "ChannelStateChange"}) is None
     assert app.sessions == {}
+
+
+def test_continue_failure_does_not_keep_session() -> None:
+    class Boom:
+        def continue_channel(self, channel_id: str, context: str, exten: str) -> None:
+            raise AriError("continue failed")
+
+    app = AriApp(rest=Boom())
+    with pytest.raises(AriError, match="continue failed"):
+        app.handle_event(_stasis_start("chan-ava"))
+    assert app.sessions == {}
+    assert app.by_uuid == {}
 
 
 def test_stasis_start_without_channel_is_error() -> None:
@@ -113,6 +132,8 @@ def test_register_hits_asterisk_info_and_returns_events_url() -> None:
         url = client.register()
         assert store.gets == ["/ari/asterisk/info"]
         assert "app=rva" in url
+        assert "api_key" not in url
+        assert "rva-ari-demo" not in url
         assert url.startswith(f"http://{_LOOP}:{port}/ari/events?")
         client.continue_channel("chan-1", "audiosocket", "s")
         assert any("/ari/channels/chan-1/continue" in p for p in store.posts)
@@ -136,7 +157,22 @@ def test_from_env_reads_rva_ari(monkeypatch: pytest.MonkeyPatch) -> None:
     client = AriClient.from_env()
     assert client.base_url == "http://127.0.0.1:8088"
     assert client.app == "rva"
-    assert "app=rva" in client.events_url()
+    events = client.events_url()
+    assert "app=rva" in events
+    assert "api_key" not in events
+    assert "rva-ari-demo" not in events
+
+
+def test_from_env_rejects_change_me(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RVA_ARI_USER", "rva")
+    monkeypatch.setenv("RVA_ARI_PASSWORD", "rva-ari-demo")
+    monkeypatch.setenv("RVA_ARI_URL", "CHANGE_ME")
+    with pytest.raises(AriError, match="RVA_ARI_URL"):
+        AriClient.from_env()
+    monkeypatch.setenv("RVA_ARI_URL", "http://127.0.0.1:8088")
+    monkeypatch.setenv("RVA_ARI_PASSWORD", "CHANGE_ME")
+    with pytest.raises(AriError, match="RVA_ARI_PASSWORD"):
+        AriClient.from_env()
 
 
 def test_register_http_error_includes_status() -> None:
@@ -148,6 +184,21 @@ def test_register_http_error_includes_status() -> None:
         port = server.server_address[1]
         client = AriClient(f"http://{_LOOP}:{port}", "rva", "rva-ari-demo")
         with pytest.raises(AriError, match="HTTP 404"):
+            client.register()
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_register_redirect_is_rejected() -> None:
+    store = _Store()
+    server = _server(store, info="redirect")
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        client = AriClient(f"http://{_LOOP}:{port}", "rva", "rva-ari-demo")
+        with pytest.raises(AriError, match="redirect"):
             client.register()
     finally:
         server.shutdown()

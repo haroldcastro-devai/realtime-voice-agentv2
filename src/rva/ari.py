@@ -78,7 +78,8 @@ class AriClient:
         return cls(url, user, password, app=_env("RVA_ARI_APP") or _APP)
 
     def events_url(self) -> str:
-        query = urlencode({"app": self.app, "api_key": f"{self.user}:{self.password}"})
+        """Events URL. Auth is Basic on the HTTP request, not in the query string."""
+        query = urlencode({"app": self.app})
         return f"{self.base_url}/ari/events?{query}"
 
     def register(self) -> str:
@@ -140,6 +141,7 @@ class AriApp:
         self.continue_context = continue_context
         self.continue_exten = continue_exten
         self.sessions: dict[str, CallSession] = {}
+        self.by_uuid: dict[str, CallSession] = {}
 
     def handle_event(self, event: dict[str, object]) -> CallSession | None:
         etype = event.get("type")
@@ -150,16 +152,30 @@ class AriApp:
             channel_id = channel.get("id")
             if not isinstance(channel_id, str) or not channel_id:
                 raise AriError("StasisStart missing channel id")
+            audio_uuid = _stasis_uuid(event)
             session = self._factory()
-            self.sessions[channel_id] = session
             if self.rest is not None:
                 self.rest.continue_channel(channel_id, self.continue_context, self.continue_exten)
+            self.sessions[channel_id] = session
+            if audio_uuid is not None:
+                self.by_uuid[audio_uuid] = session
             return session
         if etype == "StasisEnd":
             channel = event.get("channel")
             if isinstance(channel, dict):
                 channel_id = channel.get("id")
                 if isinstance(channel_id, str):
-                    self.sessions.pop(channel_id, None)
+                    session = self.sessions.pop(channel_id, None)
+                    if session is not None:
+                        for key, value in list(self.by_uuid.items()):
+                            if value is session:
+                                self.by_uuid.pop(key, None)
             return None
         return None
+
+
+def _stasis_uuid(event: dict[str, object]) -> str | None:
+    args = event.get("args")
+    if isinstance(args, list) and args and isinstance(args[0], str) and args[0]:
+        return args[0]
+    return None
