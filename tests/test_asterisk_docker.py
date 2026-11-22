@@ -73,6 +73,8 @@ def test_modules_load_pjsip_and_audiosocket() -> None:
         "chan_pjsip.so",
         "res_audiosocket.so",
         "app_audiosocket.so",
+        "res_stasis.so",
+        "app_stasis.so",
         "res_http_websocket.so",
         "res_ari.so",
         "res_ari_model.so",
