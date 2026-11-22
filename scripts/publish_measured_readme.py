@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Write ``docs/measured_latency.json`` and sync the README measured-latency section."""
+"""Write ``docs/measured_latency.json`` and sync the README measured-latency section.
+
+``--write`` re-runs :func:`scripts.bench_latency.run_benchmark` on the local machine (mock
+backends). Sub-ms mock percentiles can differ across OS/CPU; commit the JSON you intend to ship.
+``--check`` (CI) only verifies the README table matches the committed JSON — not cross-platform
+numeric parity.
+"""
 
 from __future__ import annotations
 
@@ -21,6 +27,7 @@ _MARKER_START = "<!-- measured-latency-start -->"
 _MARKER_END = "<!-- measured-latency-end -->"
 _TURNS = 32
 
+_TABLE_HEADER = "| Stage | n | p50 (ms) | p95 (ms) |"
 _TABLE_ROW = re.compile(
     r"^\|\s*(?P<stage>\w+)\s*\|\s*(?P<n>\d+)\s*\|\s*(?P<p50>[\d.]+|-)\s*\|\s*(?P<p95>[\d.]+|-)\s*\|$"
 )
@@ -47,7 +54,10 @@ def render_measured_section(data: dict[str, object]) -> str:
         "",
         "Source: [`docs/measured_latency.json`](docs/measured_latency.json) "
         f"({data['turns']} turns, mock backends). "
-        "Regenerate after re-benchmarking:",
+        "Platform, processor, and dependency versions live in that JSON only — not in the table "
+        "below. "
+        "Regenerate after re-benchmarking (percentiles may differ by machine; CI checks "
+        "README↔JSON sync via ``--check``):",
         "",
         "```bash",
         "python scripts/publish_measured_readme.py --write",
@@ -88,6 +98,8 @@ def parse_table_from_readme(readme_text: str) -> dict[str, dict[str, float | int
     if start < 0 or end < 0:
         raise ValueError("README missing measured-latency markers")
     block = readme_text[start:end]
+    if _TABLE_HEADER not in block:
+        raise ValueError("README measured table header missing")
     parsed: dict[str, dict[str, float | int | None]] = {}
     for line in block.splitlines():
         match = _TABLE_ROW.match(line.strip())

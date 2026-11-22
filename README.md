@@ -84,7 +84,7 @@ python scripts/publish_measured_readme.py --check
 
 ## Measured latency (mock)
 
-Source: [`docs/measured_latency.json`](docs/measured_latency.json) (32 turns, mock backends). Regenerate after re-benchmarking:
+Source: [`docs/measured_latency.json`](docs/measured_latency.json) (32 turns, mock backends). Platform, processor, and dependency versions live in that JSON only — not in the table below. Regenerate after re-benchmarking (percentiles may differ by machine; CI checks README↔JSON sync via ``--check``):
 
 ```bash
 python scripts/publish_measured_readme.py --write
@@ -93,8 +93,8 @@ python scripts/publish_measured_readme.py --write
 | Stage | n | p50 (ms) | p95 (ms) |
 | --- | ---: | ---: | ---: |
 | stt | 32 | 0.000 | 0.001 |
-| llm | 32 | 0.000 | 0.002 |
-| tts | 32 | 0.001 | 0.003 |
+| llm | 32 | 0.001 | 0.002 |
+| tts | 32 | 0.001 | 0.002 |
 | total | 32 | 0.001 | 0.005 |
 
 Short portfolio demo narration: [docs/DEMO_VIDEO_SCRIPT.md](docs/DEMO_VIDEO_SCRIPT.md).
