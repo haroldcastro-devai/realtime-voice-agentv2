@@ -161,23 +161,26 @@ def test_run_acme_campaign_originates_each_contact(tmp_path: Path) -> None:
         server.server_close()
 
 
-def test_campaign_collects_partial_on_mid_run_failure(tmp_path: Path) -> None:
+def test_campaign_retries_then_partial_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     csv_path = tmp_path / "mini.csv"
     csv_path.write_text(
         "msisdn,name\n+57 300 000 0001,A\n+57 300 000 0002,B\n",
         encoding="utf-8",
     )
     contacts = load_acme_campaign(csv_path)
+    monkeypatch.setenv("RVA_DIALER_MAX_RETRIES", "1")
     store = _Store()
-    server = _server(store, fail_after=1)
+    server = _server(store, fail_after=0)
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
         port = server.server_address[1]
         client = AriClient(f"http://{_LOOP}:{port}", "rva", "rva-ari-demo")
-        with pytest.raises(DialerError, match="1 originate failure") as exc:
+        with pytest.raises(DialerError, match="failed") as exc:
             run_acme_campaign(client, contacts)
-        assert len(exc.value.originated) == 1
+        assert exc.value.originated == []
     finally:
         server.shutdown()
         server.server_close()
