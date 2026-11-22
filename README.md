@@ -28,6 +28,7 @@ customer data.
 - Softphone / pjsua smoke ([deploy/asterisk/SMOKE.md](deploy/asterisk/SMOKE.md)): manual steps and `scripts/audiosocket_smoke_stub.py`; not run in CI
 - Colab NeMo Spanish worker ([colab/README.md](colab/README.md), [notebooks/colab_nemo_es.ipynb](notebooks/colab_nemo_es.ipynb)): GPU STT/TTS, Bearer + HTTPS URL printed in notebook; not run in CI
 - Colab orchestrator (`rva.colab`): probe `/health`, RTT, exponential backoff, `rva colab status`; HTTP STT/TTS fall back to mocks without unpinning an active call
+- HTTPS tunnel how-to ([colab/TUNNEL.md](colab/TUNNEL.md)): ngrok and Cloudflare; tunnel secrets stay in Colab Secrets / local `.env` only
 
 The full agent TCP listener and dashboard UI are later issues. This repo already exposes the metrics JSON.
 
@@ -65,7 +66,7 @@ GUI softphone, extension **1000**, listener on `0.0.0.0:8090`).
 
 ## Roadmap
 
-HTTPS tunnel how-to, campaign dialer, dashboard UI, and measured benchmarks.
+Campaign dialer, dashboard UI, and measured benchmarks.
 Tracked in Jira project NAT.
 
 ## License
