@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from rva.metrics import StageMetrics
+from rva.transcript_feed import TRANSCRIPT_FEED
 
 _MOCK = "mock"
 _HTTP = "http"
@@ -123,8 +124,6 @@ class Pipeline:
             self.metrics.record("tts", tts_s)
             self.metrics.record("total", total_s)
         if _transcript_enabled():
-            from rva.transcript_feed import TRANSCRIPT_FEED
-
             TRANSCRIPT_FEED.record_turn(user_text, agent_text)
         return TurnResult(
             user_text=user_text,
@@ -167,6 +166,9 @@ def build_pipeline(
     When ``metrics`` is omitted, timings still land on ``TurnResult`` but are
     not stored unless ``RVA_RECORD_LATENCY=1`` (uses :meth:`StageMetrics.shared`
     for the loopback dashboard in the same process).
+
+    With ``RVA_DASHBOARD_TRANSCRIPT=1``, each :meth:`Pipeline.turn` appends STT/LLM
+    lines to the in-process feed read by the loopback dashboard (no ARI hook yet).
 
     Pass a ``StageMetrics`` explicitly to override.
     """

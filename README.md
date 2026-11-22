@@ -31,7 +31,7 @@ customer data.
 - HTTPS tunnel how-to ([colab/TUNNEL.md](colab/TUNNEL.md)): ngrok and Cloudflare; tunnel secrets stay in Colab Secrets / local `.env` only
 - Fictional Acme campaign dialer (`rva.dialer`): bundled CSV in `deploy/dialer/acme_campaign.csv`, `+57300000XXXX` only; `rva dialer originate` POSTs ARI `/ari/channels` (fake HTTP in tests)
 - Dialer job states (`rva.dialer_jobs`): `queued` / `running` / `retry` / `done` / `failed`, bounded `RVA_DIALER_MAX_RETRIES`, in-memory or optional sqlite `RVA_DIALER_DB`
-- Local dashboard (`rva.dashboard`): `rva dashboard serve` on `RVA_DASHBOARD_HOST` / `RVA_DASHBOARD_PORT` — active calls, p50/p95, Colab UP/DOWN+RTT, optional live transcript (`RVA_DASHBOARD_TRANSCRIPT=1`); optional loopback token `RVA_DASHBOARD_TOKEN`; set `RVA_RECORD_LATENCY=1` so pipeline samples share the same store in-process
+- Local dashboard (`rva.dashboard`): `rva dashboard serve` on `RVA_DASHBOARD_HOST` / `RVA_DASHBOARD_PORT` — active calls, p50/p95, Colab UP/DOWN+RTT, optional live transcript (`RVA_DASHBOARD_TRANSCRIPT=1` via `Pipeline.turn` in the same process; ARI/AudioSocket do not call the pipeline until the full listener lands); transcript lines are global, not per channel; optional loopback token `RVA_DASHBOARD_TOKEN` (open the panel as `/?token=…` — the CLI does not print the secret; query tokens may remain in browser history); set `RVA_RECORD_LATENCY=1` so pipeline samples share the same metrics store in-process
 
 The full agent TCP listener is a later issue.
 

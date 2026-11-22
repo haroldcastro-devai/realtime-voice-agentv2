@@ -216,6 +216,38 @@ def test_dashboard_token_rejects_missing(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.delenv("RVA_DASHBOARD_TOKEN", raising=False)
 
 
+def test_dashboard_token_gates_html_until_query_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RVA_DASHBOARD_TOKEN", "local-dev-token")
+    TRANSCRIPT_FEED.reset_for_tests()
+    TRANSCRIPT_FEED.record_turn("caller", "Ava")
+    server = serve_dashboard(StageMetrics(), host=_LOOP, port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        code_root, _ = _get("/", port)
+        assert code_root == 401
+        code_html, body = _get("/?token=local-dev-token", port)
+        assert code_html == 200
+        html = body.decode("utf-8")
+        assert "authHeaders" in html
+        assert "renderTranscript" in html
+        code_api, api_body = _get(
+            "/api/dashboard",
+            port,
+            headers={"Authorization": "Bearer local-dev-token"},
+        )
+        assert code_api == 200
+        payload = json.loads(api_body.decode())
+        assert payload["transcript"][-2]["text"] == "caller"
+        assert payload["transcript"][-1]["text"] == "Ava"
+    finally:
+        shutdown_server(server)
+    monkeypatch.delenv("RVA_DASHBOARD_TOKEN", raising=False)
+
+
 def test_dashboard_token_accepts_bearer_and_query(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -262,6 +294,7 @@ def test_dashboard_html_transcript_uses_text_content_only() -> None:
 
 
 def test_transcript_xss_payload_round_trips_as_plain_text() -> None:
+    """API returns literal markup; the panel binds via textContent (no browser harness)."""
     payload = "<img src=x onerror=alert(1)>"
     TRANSCRIPT_FEED.reset_for_tests()
     TRANSCRIPT_FEED.record_turn(payload, "ok")
