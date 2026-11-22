@@ -9,17 +9,20 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlencode
 
-from rva.ari import AriClient
+from rva.ari import AriClient, AriError
 
 _FICTIONAL_MSISDN = re.compile(r"^\+57300000\d{4}$")
 _DEFAULT_ENDPOINT = "Local/{digits}@acme-campaign"
-_DEFAULT_CSV = Path(__file__).resolve().parents[2] / "deploy" / "dialer" / "acme_campaign.csv"
+_CAMPAIGN_REL = Path("deploy") / "dialer" / "acme_campaign.csv"
 
 
 class DialerError(ValueError):
     """Campaign CSV or originate failed."""
+
+    def __init__(self, message: str, *, originated: list[OriginateResult] | None = None) -> None:
+        super().__init__(message)
+        self.originated = list(originated or [])
 
 
 @dataclass(frozen=True)
@@ -78,15 +81,26 @@ def load_acme_campaign(path: Path) -> list[CampaignContact]:
     return contacts
 
 
+def resolve_campaign_csv() -> Path:
+    raw = _env("RVA_DIALER_CSV")
+    if raw:
+        return Path(raw)
+    for base in (Path.cwd(), *Path.cwd().parents):
+        candidate = base / _CAMPAIGN_REL
+        if candidate.is_file():
+            return candidate
+    packaged = Path(__file__).resolve().parents[2] / _CAMPAIGN_REL
+    if packaged.is_file():
+        return packaged
+    raise DialerError("cannot find deploy/dialer/acme_campaign.csv; set RVA_DIALER_CSV")
+
+
 def default_campaign_csv() -> Path:
-    return _DEFAULT_CSV
+    return resolve_campaign_csv()
 
 
 def campaign_csv_from_env() -> Path:
-    raw = _env("RVA_DIALER_CSV")
-    if raw is None:
-        return default_campaign_csv()
-    return Path(raw)
+    return resolve_campaign_csv()
 
 
 def _env(name: str) -> str | None:
@@ -128,10 +142,15 @@ def run_acme_campaign(
     if len(contacts) > limit:
         raise DialerError(f"campaign has {len(contacts)} rows; limit is {limit}")
     results: list[OriginateResult] = []
+    errors: list[str] = []
     for contact in contacts:
         endpoint = build_endpoint(contact.msisdn)
-        audio_uuid = uuid.uuid4().hex
-        channel_id = client.originate_channel(endpoint, [audio_uuid])
+        audio_uuid = str(uuid.uuid4())
+        try:
+            channel_id = client.originate_channel(endpoint, [audio_uuid])
+        except AriError as exc:
+            errors.append(f"{contact.msisdn}: {exc}")
+            continue
         results.append(
             OriginateResult(
                 msisdn=contact.msisdn,
@@ -140,11 +159,10 @@ def run_acme_campaign(
                 audio_uuid=audio_uuid,
             )
         )
+    if errors:
+        summary = f"{len(errors)} originate failure(s); {len(results)} succeeded"
+        detail = "; ".join(errors)
+        if not results:
+            raise DialerError(f"{summary}: {detail}")
+        raise DialerError(f"{summary}: {detail}", originated=results)
     return results
-
-
-def originate_query(endpoint: str, app: str, app_args: Sequence[str]) -> str:
-    params: list[tuple[str, str]] = [("endpoint", endpoint), ("app", app)]
-    for arg in app_args:
-        params.append(("appArgs", arg))
-    return urlencode(params)

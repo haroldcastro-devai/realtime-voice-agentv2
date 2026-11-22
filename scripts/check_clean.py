@@ -39,6 +39,7 @@ TEXT_SUFFIXES = {
     ".json",
     ".example",
     ".conf",
+    ".csv",
     ".gitignore",
     ".pem",
     ".key",

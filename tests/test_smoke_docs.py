@@ -39,7 +39,7 @@ def test_smoke_doc_matches_dialplan_and_ari_continue_path() -> None:
     assert "[audiosocket]" in smoke
     assert "Answer()" in extensions
     assert "Answer()" in smoke
-    assert f"AudioSocket({_AUDIO_UUID},host.docker.internal:8090)" in extensions
+    assert "AudioSocket(${RVA_AUDIO_SOCKET_UUID},host.docker.internal:8090)" in extensions
     assert "host.docker.internal:8090" in smoke
     assert "StasisStart" in smoke or "continue" in smoke.lower()
     assert "RVA_ARI" in smoke
