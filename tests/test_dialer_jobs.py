@@ -158,6 +158,63 @@ def test_http_campaign_jobs_cover_retry_transitions() -> None:
         server.server_close()
 
 
+def test_sqlite_prepare_campaign_skips_duplicate_msisdn(tmp_path: Path) -> None:
+    db = tmp_path / "jobs.db"
+    contacts = [CampaignContact("+573000000001"), CampaignContact("+573000000002")]
+    store = SqliteDialerStore(db)
+    store.prepare_campaign(contacts, max_attempts=2)
+    again = SqliteDialerStore(db)
+    created = again.prepare_campaign(contacts, max_attempts=2)
+    assert created == []
+    assert len(again.list_jobs()) == 2
+
+
+def test_sqlite_persists_done_state(tmp_path: Path) -> None:
+    db = tmp_path / "jobs.db"
+    store = SqliteDialerStore(db)
+    store.prepare_campaign([CampaignContact("+573000000001")], max_attempts=2)
+
+    class OkClient:
+        def originate_channel(self, endpoint: str, app_args: list[str]) -> str:
+            return "ch-sqlite"
+
+    run_campaign_jobs(OkClient(), store)  # type: ignore[arg-type]
+    reloaded = SqliteDialerStore(db)
+    job = reloaded.list_jobs()[0]
+    assert job.state == JobState.DONE
+    assert job.channel_id == "ch-sqlite"
+
+
+def test_endpoint_template_failure_does_not_stick_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RVA_DIALER_ENDPOINT", "Local/{typo}@acme-campaign")
+    store = InMemoryDialerStore()
+    store.prepare_campaign([CampaignContact("+573000000001")], max_attempts=2)
+
+    class Noop:
+        def originate_channel(self, endpoint: str, app_args: list[str]) -> str:
+            raise AssertionError("originate should not run")
+
+    jobs = run_campaign_jobs(Noop(), store)  # type: ignore[arg-type]
+    assert jobs[0].state == JobState.FAILED
+    assert store.ready_jobs() == []
+
+
+def test_ari_timeout_error_retries_then_fails() -> None:
+    store = InMemoryDialerStore()
+    store.prepare_campaign([CampaignContact("+573000000001")], max_attempts=2)
+
+    class TimeoutClient:
+        def originate_channel(self, endpoint: str, app_args: list[str]) -> str:
+            raise AriError("timeout")
+
+    jobs = run_campaign_jobs(TimeoutClient(), store)  # type: ignore[arg-type]
+    assert jobs[0].state == JobState.FAILED
+    assert jobs[0].last_error is not None
+    assert "timeout" in jobs[0].last_error
+
+
 def test_max_attempts_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RVA_DIALER_MAX_RETRIES", "5")
     assert max_attempts_from_env() == 5

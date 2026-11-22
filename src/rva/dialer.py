@@ -11,6 +11,7 @@ from pathlib import Path
 
 from rva.ari import AriClient
 from rva.dialer_jobs import (
+    DialerJob,
     InMemoryDialerStore,
     JobState,
     job_to_dict,
@@ -26,9 +27,16 @@ _CAMPAIGN_REL = Path("deploy") / "dialer" / "acme_campaign.csv"
 class DialerError(ValueError):
     """Campaign CSV or originate failed."""
 
-    def __init__(self, message: str, *, originated: list[OriginateResult] | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        originated: list[OriginateResult] | None = None,
+        jobs: list[dict[str, object]] | None = None,
+    ) -> None:
         super().__init__(message)
         self.originated = list(originated or [])
+        self.jobs = list(jobs or [])
 
 
 @dataclass(frozen=True)
@@ -151,6 +159,45 @@ def build_endpoint(msisdn: str) -> str:
         raise DialerError(f"RVA_DIALER_ENDPOINT placeholder missing: {exc}") from exc
 
 
+def _raise_if_campaign_failed(jobs: list[DialerJob]) -> list[dict[str, object]]:
+    job_dicts = [job_to_dict(job) for job in jobs]
+    done = [job for job in jobs if job.state == JobState.DONE]
+    failed = [job for job in jobs if job.state == JobState.FAILED]
+    if not failed:
+        return job_dicts
+    detail = "; ".join(f"{j.msisdn}: {j.last_error}" for j in failed)
+    originated = [
+        OriginateResult(
+            msisdn=j.msisdn,
+            channel_id=j.channel_id or "",
+            endpoint=j.endpoint or "",
+            audio_uuid=j.audio_uuid or "",
+        )
+        for j in done
+    ]
+    if not done:
+        raise DialerError(f"all {len(failed)} job(s) failed: {detail}", jobs=job_dicts)
+    raise DialerError(
+        f"{len(failed)} job(s) failed after retries; {len(done)} done: {detail}",
+        originated=originated,
+        jobs=job_dicts,
+    )
+
+
+def _run_campaign(
+    client: AriClient,
+    contacts: Sequence[CampaignContact],
+    store,
+    *,
+    max_contacts: int | None = None,
+) -> list:
+    limit = max_contacts if max_contacts is not None else _max_contacts()
+    if len(contacts) > limit:
+        raise DialerError(f"campaign has {len(contacts)} rows; limit is {limit}")
+    store.prepare_campaign(contacts, max_attempts=max_attempts_from_env())
+    return run_campaign_jobs(client, store)
+
+
 def run_acme_campaign(
     client: AriClient,
     contacts: Sequence[CampaignContact],
@@ -158,13 +205,10 @@ def run_acme_campaign(
     max_contacts: int | None = None,
     store: InMemoryDialerStore | None = None,
 ) -> list[OriginateResult]:
-    limit = max_contacts if max_contacts is not None else _max_contacts()
-    if len(contacts) > limit:
-        raise DialerError(f"campaign has {len(contacts)} rows; limit is {limit}")
     job_store = store if store is not None else InMemoryDialerStore()
-    job_store.enqueue_contacts(contacts, max_attempts=max_attempts_from_env())
-    jobs = run_campaign_jobs(client, job_store)
-    results = [
+    jobs = _run_campaign(client, contacts, job_store, max_contacts=max_contacts)
+    _raise_if_campaign_failed(jobs)
+    return [
         OriginateResult(
             msisdn=job.msisdn,
             channel_id=job.channel_id or "",
@@ -174,17 +218,6 @@ def run_acme_campaign(
         for job in jobs
         if job.state == JobState.DONE
     ]
-    failed = [job for job in jobs if job.state == JobState.FAILED]
-    if failed and not results:
-        detail = "; ".join(f"{j.msisdn}: {j.last_error}" for j in failed)
-        raise DialerError(f"all {len(failed)} job(s) failed: {detail}")
-    if failed:
-        detail = "; ".join(f"{j.msisdn}: {j.last_error}" for j in failed)
-        raise DialerError(
-            f"{len(failed)} job(s) failed after retries; {len(results)} done: {detail}",
-            originated=results,
-        )
-    return results
 
 
 def run_acme_campaign_jobs(
@@ -193,29 +226,6 @@ def run_acme_campaign_jobs(
     *,
     max_contacts: int | None = None,
 ) -> list[dict[str, object]]:
-    limit = max_contacts if max_contacts is not None else _max_contacts()
-    if len(contacts) > limit:
-        raise DialerError(f"campaign has {len(contacts)} rows; limit is {limit}")
     store = open_job_store()
-    store.enqueue_contacts(contacts, max_attempts=max_attempts_from_env())
-    jobs = run_campaign_jobs(client, store)
-    failed = [job for job in jobs if job.state == JobState.FAILED]
-    results = [job_to_dict(job) for job in jobs]
-    if failed:
-        detail = "; ".join(f"{j.msisdn}: {j.last_error}" for j in failed)
-        done = [j for j in jobs if j.state == JobState.DONE]
-        if not done:
-            raise DialerError(f"all {len(failed)} job(s) failed: {detail}")
-        raise DialerError(
-            f"{len(failed)} job(s) failed after retries; {len(done)} done: {detail}",
-            originated=[
-                OriginateResult(
-                    msisdn=j.msisdn,
-                    channel_id=j.channel_id or "",
-                    endpoint=j.endpoint or "",
-                    audio_uuid=j.audio_uuid or "",
-                )
-                for j in done
-            ],
-        )
-    return results
+    jobs = _run_campaign(client, contacts, store, max_contacts=max_contacts)
+    return _raise_if_campaign_failed(jobs)
