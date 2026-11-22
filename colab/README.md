@@ -17,8 +17,8 @@ TTS uses public checkpoints `tts_es_fastpitch_multispeaker` and
 The notebook:
 
 1. Installs public NeMo ASR/TTS wheels (Spanish FastPitch + HiFiGAN via `from_pretrained`).
-2. Generates a random **Bearer** token and prints an **HTTPS** base URL (optional ngrok; full tunnel
-   options are a later docs issue).
+2. Generates a random **Bearer** token and prints an **HTTPS** base URL (optional ngrok via
+   `NGROK_AUTHTOKEN`; see [TUNNEL.md](TUNNEL.md) for ngrok and Cloudflare).
 3. Starts `colab/nemo_server.py` (OpenAI-compatible `/v1/audio/transcriptions` and
    `/v1/audio/speech`).
 
