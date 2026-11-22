@@ -134,13 +134,40 @@ def test_in_call_pins_http_despite_fallback(monkeypatch) -> None:
         orch.enter_call(remote_stt_tts=True)
         handler.ok = False
         handler.status_code = 503
-        orch.refresh()
+        snap = orch.refresh()
         assert orch.use_remote_stt_tts() is True
-        snap = orch._status_snapshot(backoff_remaining_s=0.0)
         assert snap.pinned_remote is True
         assert snap.fallback_stt_tts is False
     finally:
         server.shutdown()
+
+
+def test_refresh_skips_probe_while_in_backoff(monkeypatch) -> None:
+    probes: list[int] = []
+
+    def counting_probe(_url: str, _token: str | None, _timeout: float) -> tuple[bool, float | None]:
+        probes.append(1)
+        return False, 1.0
+
+    monkeypatch.setenv("RVA_COLAB_URL", "http://127.0.0.1:9")
+    orch = ColabOrchestrator(clock=lambda: 0.0, probe=counting_probe)
+    orch.refresh()
+    assert probes == [1]
+    probes.clear()
+    snap = orch.refresh()
+    assert probes == []
+    assert snap.consecutive_failures == 1
+    assert snap.backoff_remaining_s > 0
+
+
+def test_cli_colab_status_unconfigured(monkeypatch, capsys) -> None:
+    monkeypatch.delenv("RVA_COLAB_URL", raising=False)
+    code = rva_main(["colab", "status"])
+    assert code == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["configured"] is False
+    assert out["health_ok"] is False
+    assert out["rtt_ms"] is None
 
 
 def test_cli_colab_status_json(monkeypatch, capsys) -> None:
