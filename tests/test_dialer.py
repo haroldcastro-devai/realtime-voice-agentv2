@@ -73,13 +73,14 @@ def test_acme_campaign_dialplan_answers_without_stasis() -> None:
     assert "[acme-campaign]" in text
     block = text.split("[acme-campaign]", 1)[1].split("[", 1)[0]
     assert "Answer()" in block
-    assert "Return()" in block
+    assert "Wait(600)" in block
     assert "Stasis(rva" not in block
 
 
 def test_audiosocket_uses_channel_variable() -> None:
     text = (_REPO / "deploy" / "asterisk" / "etc" / "extensions.conf").read_text(encoding="utf-8")
     assert "AudioSocket(${RVA_AUDIO_SOCKET_UUID}" in text
+    assert "ExecIf" in text and "RVA_AUDIO_SOCKET_UUID" in text
 
 
 class _Store:
