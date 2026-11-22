@@ -158,6 +158,27 @@ def test_http_campaign_jobs_cover_retry_transitions() -> None:
         server.server_close()
 
 
+def test_stale_running_on_final_attempt_becomes_failed(tmp_path: Path) -> None:
+    db = tmp_path / "jobs.db"
+    store = SqliteDialerStore(db)
+    job = store.enqueue_contacts([CampaignContact("+573000000001")], max_attempts=2)[0]
+    store._save(job, state=JobState.RUNNING, attempts=2)
+    reopened = SqliteDialerStore(db)
+    final = reopened.get(job.job_id)
+    assert final.state == JobState.FAILED
+    assert reopened.ready_jobs() == []
+
+
+def test_stale_running_with_retries_left_becomes_retry(tmp_path: Path) -> None:
+    db = tmp_path / "jobs.db"
+    store = SqliteDialerStore(db)
+    job = store.enqueue_contacts([CampaignContact("+573000000001")], max_attempts=3)[0]
+    store._save(job, state=JobState.RUNNING, attempts=1)
+    reopened = SqliteDialerStore(db)
+    assert reopened.get(job.job_id).state == JobState.RETRY
+    assert len(reopened.ready_jobs()) == 1
+
+
 def test_sqlite_prepare_campaign_skips_duplicate_msisdn(tmp_path: Path) -> None:
     db = tmp_path / "jobs.db"
     contacts = [CampaignContact("+573000000001"), CampaignContact("+573000000002")]

@@ -202,7 +202,15 @@ class SqliteDialerStore(DialerJobStore):
 
     def reconcile_stale_running(self) -> None:
         for job in self.list_jobs():
-            if job.state == JobState.RUNNING:
+            if job.state != JobState.RUNNING:
+                continue
+            if job.attempts >= job.max_attempts:
+                self._save(
+                    job,
+                    state=JobState.FAILED,
+                    last_error=job.last_error or "interrupted on final attempt",
+                )
+            else:
                 self._save(
                     job,
                     state=JobState.RETRY,
