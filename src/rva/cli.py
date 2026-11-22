@@ -8,7 +8,12 @@ import sys
 
 from rva.ari import AriClient, AriError
 from rva.colab import ColabOrchestrator
-from rva.dashboard import DashboardError, dashboard_url, serve_dashboard
+from rva.dashboard import (
+    DashboardError,
+    dashboard_token_required,
+    dashboard_url,
+    serve_dashboard,
+)
 from rva.dialer import (
     DialerError,
     campaign_csv_from_env,
@@ -93,7 +98,11 @@ def _dashboard_serve(_args: argparse.Namespace) -> int:
         return 1
     host, port = server.server_address[:2]
     url = dashboard_url(host, port)
-    json.dump({"dashboard_url": url, "api": f"{url}api/dashboard"}, sys.stdout, indent=2)
+    payload = {"dashboard_url": url, "api": f"{url}api/dashboard"}
+    if dashboard_token_required():
+        payload["token_required"] = True
+        payload["hint"] = "Open with ?token=<RVA_DASHBOARD_TOKEN> or send Authorization: Bearer"
+    json.dump(payload, sys.stdout, indent=2)
     sys.stdout.write("\n")
     try:
         server.serve_forever()

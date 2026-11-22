@@ -122,6 +122,10 @@ class Pipeline:
             self.metrics.record("llm", llm_s)
             self.metrics.record("tts", tts_s)
             self.metrics.record("total", total_s)
+        if _transcript_enabled():
+            from rva.transcript_feed import TRANSCRIPT_FEED
+
+            TRANSCRIPT_FEED.record_turn(user_text, agent_text)
         return TurnResult(
             user_text=user_text,
             agent_text=agent_text,
@@ -133,13 +137,21 @@ class Pipeline:
         )
 
 
-def _metrics_from_env() -> StageMetrics | None:
-    raw = os.environ.get("RVA_RECORD_LATENCY")
+def _env_flag(name: str) -> bool:
+    raw = os.environ.get(name)
     if raw is None or raw == "" or raw == "CHANGE_ME":
-        return None
-    if raw.strip().lower() in ("1", "true", "yes", "on"):
+        return False
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _metrics_from_env() -> StageMetrics | None:
+    if _env_flag("RVA_RECORD_LATENCY"):
         return StageMetrics.shared()
     return None
+
+
+def _transcript_enabled() -> bool:
+    return _env_flag("RVA_DASHBOARD_TRANSCRIPT")
 
 
 def build_pipeline(
