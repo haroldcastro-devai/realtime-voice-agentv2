@@ -43,3 +43,19 @@ def test_readme_table_matches_measured_json() -> None:
 
 def test_publish_check_cli_exits_zero() -> None:
     assert main(["--check"]) == 0
+
+
+def test_parse_table_requires_header() -> None:
+    import pytest
+    from scripts.publish_measured_readme import _MARKER_END, _MARKER_START
+
+    bad = f"{_MARKER_START}\n| stt | 1 | 0 | 0 |\n{_MARKER_END}"
+    with pytest.raises(ValueError, match="header"):
+        parse_table_from_readme(bad)
+
+
+def test_demo_video_script_has_expected_beats() -> None:
+    text = (_REPO / "docs" / "DEMO_VIDEO_SCRIPT.md").read_text(encoding="utf-8")
+    assert len(text.strip()) > 100
+    for token in ("Ava", "bench_latency", "dashboard", "Acme"):
+        assert token in text
