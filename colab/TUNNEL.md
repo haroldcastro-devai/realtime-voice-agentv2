@@ -25,27 +25,43 @@ paste the `https://…` URL into `RVA_*_URL`.
 
 ## Option B: Cloudflare Tunnel (quick tunnel)
 
-For a lab demo without editing the notebook, use [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) on a machine that can reach port **8000** (often via Colab’s printed host is not reachable — run `cloudflared` **inside Colab** in an extra cell, or use ngrok from the notebook).
+Use [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) when you
+prefer Cloudflare over ngrok. The Colab runtime cannot expose port 8000 by itself, so run the
+tunnel **inside the same Colab session** (extra cell below) or use Option A.
 
-**Inside Colab** (after the FastAPI thread is listening):
+**Inside Colab** (after the FastAPI thread is listening on port **8000**):
 
 ```python
-# Install once per runtime: !pip install -q cloudflared  # or use !wget + binary from Cloudflare docs
-import subprocess, re, os
+# One-time per runtime (Linux amd64 Colab VM):
+# !wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
+# !chmod +x /usr/local/bin/cloudflared
+import re
+import subprocess
+
 proc = subprocess.Popen(
-    ["cloudflared", "tunnel", "--url", "http://127.0.0.1:8000"],
+    ["/usr/local/bin/cloudflared", "tunnel", "--url", "http://127.0.0.1:8000"],
     stdout=subprocess.PIPE,
     stderr=subprocess.STDOUT,
     text=True,
+    bufsize=1,
 )
-for _ in range(50):
+url = None
+for _ in range(120):
     line = proc.stdout.readline()
-    if "https://" in line:
-        m = re.search(r"https://\\S+", line)
-        if m:
-            print("RVA_COLAB_URL (HTTPS base):", m.group(0).rstrip(")"))
-            break
+    if not line:
+        break
+    m = re.search(r"https://[a-zA-Z0-9.-]+\.trycloudflare\.com", line)
+    if m:
+        url = m.group(0)
+        break
+if url:
+    print("RVA_COLAB_URL (HTTPS base):", url)
+else:
+    print("cloudflared did not print a trycloudflare URL yet")
 ```
+
+Point local `RVA_STT_URL` / `RVA_TTS_URL` at `{url}/v1/audio/transcriptions` and
+`{url}/v1/audio/speech` bases (same HTTPS host, OpenAI-shaped paths on `nemo_server`).
 
 Copy the printed URL to your local `.env` as in step 4 above. **Do not** save the tunnel URL
 in git; it changes when the tunnel restarts.
@@ -60,4 +76,4 @@ For a named Cloudflare Tunnel, create the tunnel in the [Cloudflare Zero Trust d
 
 ## Out of scope
 
-Automating tunnel bring-up in CI, production SLA, or a always-on hosted inference endpoint.
+Automating tunnel bring-up in CI, production SLA, or an always-on hosted inference endpoint.
