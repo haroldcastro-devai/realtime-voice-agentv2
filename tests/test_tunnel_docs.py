@@ -27,6 +27,13 @@ def test_tunnel_doc_covers_ngrok_and_cloudflare() -> None:
     assert "cloudflare" in text.lower() or "cloudflared" in text.lower()
     assert "RVA_COLAB_URL" in text
     assert "RVA_STT_URL" in text
+    assert "RVA_TTS_URL" in text
+    assert "RVA_TTS_BACKEND=http" in text
+    assert "/v1/audio/transcriptions" in text
+    assert "/v1/audio/speech" in text
+    assert "cloudflared-linux-amd64" in text
+    assert "trycloudflare" in text
+    assert "https://\\S+" not in text
     assert "not in git" in text.lower() or "never commit" in text.lower()
     assert "Colab" in text and "Secret" in text
     assert "rva colab status" in text
@@ -47,7 +54,8 @@ def test_colab_readme_links_tunnel_guide() -> None:
 def test_notebook_references_tunnel_doc() -> None:
     nb = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
     src = "".join("".join(c.get("source", [])) for c in nb["cells"])
-    assert "TUNNEL.md" in src or "NGROK_AUTHTOKEN" in src
+    assert "TUNNEL.md" in src
+    assert "NGROK_AUTHTOKEN" in src
 
 
 def test_env_example_documents_colab_url_not_tunnel_secrets() -> None:
@@ -59,5 +67,12 @@ def test_env_example_documents_colab_url_not_tunnel_secrets() -> None:
 
 def test_ci_does_not_run_tunnel_tools() -> None:
     text = CI.read_text(encoding="utf-8")
-    assert not re.search(r"\bngrok\b", text, re.IGNORECASE)
-    assert not re.search(r"\bcloudflared\b", text, re.IGNORECASE)
+    assert "services:" not in text
+    assert "container:" not in text
+    assert "python -m pytest" in text
+    for pattern in (
+        r"\bngrok\b",
+        r"\bcloudflared\b",
+        r"\bcloudflare\s+tunnel\b",
+    ):
+        assert not re.search(pattern, text, re.IGNORECASE)
