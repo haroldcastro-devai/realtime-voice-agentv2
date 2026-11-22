@@ -133,16 +133,34 @@ class Pipeline:
         )
 
 
-def build_pipeline(metrics: StageMetrics | None = None) -> Pipeline:
+def build_pipeline(
+    metrics: StageMetrics | None = None,
+    orchestrator: object | None = None,
+) -> Pipeline:
     """Wire backends from ``RVA_*_BACKEND`` (default ``mock``).
+
+    When a :class:`~rva.colab.ColabOrchestrator` is passed and ``RVA_COLAB_URL`` is set,
+    HTTP STT/TTS fall back to mocks while the Colab worker is in backoff (in-call turns
+    stay on HTTP when pinned).
 
     When ``metrics`` is omitted, timings still land on ``TurnResult`` but are
     not stored. Pass a ``StageMetrics`` for the dashboard API.
     """
+    stt_name = _backend_name("RVA_STT_BACKEND")
+    tts_name = _backend_name("RVA_TTS_BACKEND")
+    if orchestrator is not None:
+        from rva.colab import ColabOrchestrator
+
+        if isinstance(orchestrator, ColabOrchestrator) and orchestrator.colab_configured():
+            orchestrator.refresh()
+            if stt_name == _HTTP and not orchestrator.use_remote_stt_tts():
+                stt_name = _MOCK
+            if tts_name == _HTTP and not orchestrator.use_remote_stt_tts():
+                tts_name = _MOCK
     return Pipeline(
-        stt=_make_stt(_backend_name("RVA_STT_BACKEND")),
+        stt=_make_stt(stt_name),
         llm=_make_llm(_backend_name("RVA_LLM_BACKEND")),
-        tts=_make_tts(_backend_name("RVA_TTS_BACKEND")),
+        tts=_make_tts(tts_name),
         metrics=metrics,
     )
 
