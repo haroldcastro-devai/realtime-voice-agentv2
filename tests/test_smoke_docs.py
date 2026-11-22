@@ -60,8 +60,12 @@ def test_asterisk_readme_links_smoke_guide() -> None:
 def test_ci_does_not_run_asterisk_or_pjsua() -> None:
     text = CI.read_text(encoding="utf-8")
     assert "services:" not in text
+    assert "container:" not in text
+    assert "python -m pytest" in text
     for pattern in (
         r"\bdocker\s+compose\b",
+        r"\bdocker\s+run\b",
+        r"docker/setup-buildx",
         r"\bpjsua\b",
         r"\basterisk\b",
     ):
