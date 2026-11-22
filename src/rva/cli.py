@@ -12,7 +12,7 @@ from rva.dialer import (
     DialerError,
     campaign_csv_from_env,
     load_acme_campaign,
-    run_acme_campaign,
+    run_acme_campaign_jobs,
 )
 
 
@@ -48,12 +48,13 @@ def _dialer_originate(args: argparse.Namespace) -> int:
         contacts = load_acme_campaign(path)
         client = AriClient.from_env()
         client.register()
-        results = run_acme_campaign(client, contacts)
+        jobs = run_acme_campaign_jobs(client, contacts)
     except (DialerError, AriError) as exc:
         partial = getattr(exc, "originated", None) or []
         payload = {
             "error": str(exc),
             "campaign_csv": str(path),
+            "jobs": [],
             "originated": [
                 {
                     "msisdn": row.msisdn,
@@ -69,15 +70,8 @@ def _dialer_originate(args: argparse.Namespace) -> int:
         return 1
     payload = {
         "campaign_csv": str(path),
-        "originated": [
-            {
-                "msisdn": row.msisdn,
-                "channel_id": row.channel_id,
-                "endpoint": row.endpoint,
-                "audio_uuid": row.audio_uuid,
-            }
-            for row in results
-        ],
+        "jobs": jobs,
+        "originated": [row for row in jobs if row.get("state") == "done"],
     }
     json.dump(payload, sys.stdout, indent=2)
     sys.stdout.write("\n")

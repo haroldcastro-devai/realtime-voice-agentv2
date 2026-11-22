@@ -30,6 +30,7 @@ customer data.
 - Colab orchestrator (`rva.colab`): probe `/health`, RTT, exponential backoff, `rva colab status`; HTTP STT/TTS fall back to mocks without unpinning an active call
 - HTTPS tunnel how-to ([colab/TUNNEL.md](colab/TUNNEL.md)): ngrok and Cloudflare; tunnel secrets stay in Colab Secrets / local `.env` only
 - Fictional Acme campaign dialer (`rva.dialer`): bundled CSV in `deploy/dialer/acme_campaign.csv`, `+57300000XXXX` only; `rva dialer originate` POSTs ARI `/ari/channels` (fake HTTP in tests)
+- Dialer job states (`rva.dialer_jobs`): `queued` / `running` / `retry` / `done` / `failed`, bounded `RVA_DIALER_MAX_RETRIES`, in-memory or optional sqlite `RVA_DIALER_DB`
 
 The full agent TCP listener and dashboard UI are later issues. This repo already exposes the metrics JSON.
 
@@ -67,7 +68,7 @@ GUI softphone, extension **1000**, listener on `0.0.0.0:8090`).
 
 ## Roadmap
 
-Dialer job states/retries, dashboard UI, and measured benchmarks.
+Dashboard UI and measured benchmarks.
 Tracked in Jira project NAT.
 
 ## License
