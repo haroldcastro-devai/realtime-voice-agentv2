@@ -48,3 +48,7 @@ jobs:
           python-version: "3.12"
       - name: check_clean
         run: bash scripts/check_clean.sh
+      - name: measured latency README sync
+        env:
+          PYTHONPATH: src:.
+        run: python scripts/publish_measured_readme.py --check

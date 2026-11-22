@@ -76,11 +76,34 @@ URLs in ``.env``.
 ```bash
 python scripts/bench_latency.py -n 32
 python scripts/bench_latency.py -n 32 --json
+python scripts/publish_measured_readme.py --write
+python scripts/publish_measured_readme.py --check
 ```
+
+<!-- measured-latency-start -->
+
+## Measured latency (mock)
+
+Source: [`docs/measured_latency.json`](docs/measured_latency.json) (32 turns, mock backends). Regenerate after re-benchmarking:
+
+```bash
+python scripts/publish_measured_readme.py --write
+```
+
+| Stage | n | p50 (ms) | p95 (ms) |
+| --- | ---: | ---: | ---: |
+| stt | 32 | 0.000 | 0.001 |
+| llm | 32 | 0.000 | 0.002 |
+| tts | 32 | 0.001 | 0.003 |
+| total | 32 | 0.001 | 0.005 |
+
+Short portfolio demo narration: [docs/DEMO_VIDEO_SCRIPT.md](docs/DEMO_VIDEO_SCRIPT.md).
+
+<!-- measured-latency-end -->
 
 ## Roadmap
 
-README demo script with measured numbers (NAT-35).
+Optional RabbitMQ + MinIO recordings (NAT-36).
 Tracked in Jira project NAT.
 
 ## License
