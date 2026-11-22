@@ -51,10 +51,11 @@ def _dialer_originate(args: argparse.Namespace) -> int:
         jobs = run_acme_campaign_jobs(client, contacts)
     except (DialerError, AriError) as exc:
         partial = getattr(exc, "originated", None) or []
+        jobs_payload = getattr(exc, "jobs", None) or []
         payload = {
             "error": str(exc),
             "campaign_csv": str(path),
-            "jobs": [],
+            "jobs": jobs_payload,
             "originated": [
                 {
                     "msisdn": row.msisdn,

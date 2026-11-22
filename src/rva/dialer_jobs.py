@@ -27,8 +27,8 @@ class JobState(str, Enum):
     FAILED = "failed"
 
 
-_TERMINAL = frozenset({JobState.DONE, JobState.FAILED})
 _READY = frozenset({JobState.QUEUED, JobState.RETRY})
+_ACTIVE = frozenset({JobState.QUEUED, JobState.RETRY, JobState.RUNNING})
 
 
 class JobStoreError(ValueError):
@@ -75,6 +75,11 @@ class DialerJobStore:
         self, contacts: Sequence[ContactLike], *, max_attempts: int
     ) -> list[DialerJob]:
         raise NotImplementedError
+
+    def prepare_campaign(
+        self, contacts: Sequence[ContactLike], *, max_attempts: int
+    ) -> list[DialerJob]:
+        return self.enqueue_contacts(contacts, max_attempts=max_attempts)
 
     def list_jobs(self) -> list[DialerJob]:
         raise NotImplementedError
@@ -182,11 +187,38 @@ CREATE TABLE IF NOT EXISTS dialer_jobs (
 
 
 class SqliteDialerStore(DialerJobStore):
+    _SELECT = """
+        SELECT job_id, msisdn, name, state, attempts, max_attempts,
+               last_error, channel_id, audio_uuid, endpoint
+        FROM dialer_jobs
+    """
+
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._path = path
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+        self.reconcile_stale_running()
+
+    def reconcile_stale_running(self) -> None:
+        for job in self.list_jobs():
+            if job.state == JobState.RUNNING:
+                self._save(
+                    job,
+                    state=JobState.RETRY,
+                    last_error=job.last_error or "interrupted while running",
+                )
+
+    def prepare_campaign(
+        self, contacts: Sequence[ContactLike], *, max_attempts: int
+    ) -> list[DialerJob]:
+        active = {job.msisdn: job for job in self.list_jobs() if job.state in _ACTIVE}
+        created: list[DialerJob] = []
+        for contact in contacts:
+            if contact.msisdn in active:
+                continue
+            created.extend(self.enqueue_contacts([contact], max_attempts=max_attempts))
+        return created
 
     def enqueue_contacts(
         self, contacts: Sequence[ContactLike], *, max_attempts: int
@@ -223,12 +255,12 @@ class SqliteDialerStore(DialerJobStore):
 
     def list_jobs(self) -> list[DialerJob]:
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM dialer_jobs ORDER BY job_id").fetchall()
+            rows = conn.execute(f"{self._SELECT} ORDER BY job_id").fetchall()
         return [_row_to_job(row) for row in rows]
 
     def get(self, job_id: str) -> DialerJob:
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM dialer_jobs WHERE job_id = ?", (job_id,)).fetchone()
+            row = conn.execute(f"{self._SELECT} WHERE job_id = ?", (job_id,)).fetchone()
         if row is None:
             raise JobStoreError(f"unknown job {job_id}")
         return _row_to_job(row)
@@ -268,32 +300,38 @@ class SqliteDialerStore(DialerJobStore):
         return updated
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self._path)
+        conn = sqlite3.connect(self._path)
+        conn.row_factory = sqlite3.Row
+        return conn
 
 
-def _row_to_job(row: tuple[object, ...]) -> DialerJob:
+def _row_to_job(row: sqlite3.Row) -> DialerJob:
     return DialerJob(
-        job_id=str(row[0]),
-        msisdn=str(row[1]),
-        name=str(row[2]),
-        state=JobState(str(row[3])),
-        attempts=int(row[4]),
-        max_attempts=int(row[5]),
-        last_error=str(row[6]) if row[6] is not None else None,
-        channel_id=str(row[7]) if row[7] is not None else None,
-        audio_uuid=str(row[8]) if row[8] is not None else None,
-        endpoint=str(row[9]) if row[9] is not None else None,
+        job_id=str(row["job_id"]),
+        msisdn=str(row["msisdn"]),
+        name=str(row["name"]),
+        state=JobState(str(row["state"])),
+        attempts=int(row["attempts"]),
+        max_attempts=int(row["max_attempts"]),
+        last_error=str(row["last_error"]) if row["last_error"] is not None else None,
+        channel_id=str(row["channel_id"]) if row["channel_id"] is not None else None,
+        audio_uuid=str(row["audio_uuid"]) if row["audio_uuid"] is not None else None,
+        endpoint=str(row["endpoint"]) if row["endpoint"] is not None else None,
     )
 
 
 def run_campaign_jobs(client: AriClient, store: DialerJobStore) -> list[DialerJob]:
     """Process every job that is ``queued`` or ``retry`` until none remain."""
-    from rva.dialer import build_endpoint
+    from rva.dialer import DialerError, build_endpoint
 
     while store.ready_jobs():
         for job in list(store.ready_jobs()):
             running = store.mark_running(job.job_id)
-            endpoint = build_endpoint(running.msisdn)
+            try:
+                endpoint = build_endpoint(running.msisdn)
+            except DialerError as exc:
+                store.mark_failure(running.job_id, str(exc))
+                continue
             audio_uuid = str(uuid.uuid4())
             try:
                 channel_id = client.originate_channel(endpoint, [audio_uuid])
@@ -314,7 +352,7 @@ def job_to_dict(job: DialerJob) -> dict[str, object]:
         "job_id": job.job_id,
         "msisdn": job.msisdn,
         "name": job.name,
-        "state": job.state,
+        "state": job.state.value,
         "attempts": job.attempts,
         "max_attempts": job.max_attempts,
         "last_error": job.last_error,
