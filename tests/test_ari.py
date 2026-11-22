@@ -8,7 +8,15 @@ from threading import Thread
 
 import pytest
 
-from rva.ari import AriApp, AriClient, AriError
+from rva.ari import (
+    AUDIO_SOCKET_VAR,
+    DEFAULT_AUDIO_SOCKET_UUID,
+    AriApp,
+    AriClient,
+    AriError,
+    audiosocket_uuid,
+    build_originate_query,
+)
 from rva.colab import ColabOrchestrator
 from rva.session import CallSession
 
@@ -52,12 +60,25 @@ def _server(store: _Store, *, info: str = "ok") -> ThreadingHTTPServer:
                 return
             self._raw(404, b"{}", "application/json")
 
+        def do_PUT(self) -> None:
+            path = self.path.split("?", 1)[0]
+            store.posts.append(self.path)
+            if "/variable/" in path:
+                self.send_response(204)
+                self.end_headers()
+                return
+            self._raw(404, b"{}", "application/json")
+
         def do_POST(self) -> None:
             path = self.path.split("?", 1)[0]
             store.posts.append(self.path)
             if path.startswith("/ari/channels/") and path.endswith("/continue"):
                 self.send_response(204)
                 self.end_headers()
+                return
+            if path == "/ari/channels":
+                body = json.dumps({"id": "chan-orig", "state": "Down"}).encode()
+                self._raw(200, body)
                 return
             self._raw(404, b"{}", "application/json")
 
@@ -89,6 +110,9 @@ def test_continue_failure_does_not_pin_colab(monkeypatch) -> None:
         def continue_channel(self, _channel_id: str, _context: str, _exten: str) -> None:
             raise AriError("continue failed")
 
+        def set_channel_var(self, _channel_id: str, _variable: str, _value: str) -> None:
+            return
+
     app = AriApp(rest=Boom())
     with pytest.raises(AriError):
         app.handle_event(_stasis_start("chan-boom"))
@@ -116,9 +140,14 @@ def test_stasis_start_pins_colab_when_http_backends(monkeypatch) -> None:
 def test_stasis_start_creates_call_session_and_continues() -> None:
     posts: list[tuple[str, str, str]] = []
 
+    vars_set: list[tuple[str, str, str]] = []
+
     class Rest:
         def continue_channel(self, channel_id: str, context: str, exten: str) -> None:
             posts.append((channel_id, context, exten))
+
+        def set_channel_var(self, channel_id: str, variable: str, value: str) -> None:
+            vars_set.append((channel_id, variable, value))
 
     app = AriApp(rest=Rest())
     session = app.handle_event(_stasis_start("chan-ava"))
@@ -126,6 +155,9 @@ def test_stasis_start_creates_call_session_and_continues() -> None:
     assert app.sessions["chan-ava"] is session
     assert app.by_uuid[_AUDIO_UUID] is session
     assert posts == [("chan-ava", "audiosocket", "s")]
+    assert vars_set == [
+        ("chan-ava", AUDIO_SOCKET_VAR, audiosocket_uuid(_AUDIO_UUID)),
+    ]
     app.handle_event({"type": "StasisEnd", "channel": {"id": "chan-ava"}})
     assert "chan-ava" not in app.sessions
     assert _AUDIO_UUID not in app.by_uuid
@@ -141,6 +173,9 @@ def test_continue_failure_does_not_keep_session() -> None:
     class Boom:
         def continue_channel(self, channel_id: str, context: str, exten: str) -> None:
             raise AriError("continue failed")
+
+        def set_channel_var(self, _channel_id: str, _variable: str, _value: str) -> None:
+            return
 
     app = AriApp(rest=Boom())
     with pytest.raises(AriError, match="continue failed"):
@@ -237,6 +272,22 @@ def test_register_redirect_is_rejected() -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_audiosocket_uuid_formats_hex_app_args() -> None:
+    assert (
+        audiosocket_uuid("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        == "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    )
+    assert audiosocket_uuid(_AUDIO_UUID) == _AUDIO_UUID
+    assert audiosocket_uuid(None) == DEFAULT_AUDIO_SOCKET_UUID
+
+
+def test_build_originate_query() -> None:
+    q = build_originate_query("Local/x@acme-campaign", "rva", ["u1"])
+    assert "endpoint=Local" in q
+    assert "app=rva" in q
+    assert "appArgs=u1" in q
 
 
 def test_register_bad_json_is_ari_error() -> None:

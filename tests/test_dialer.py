@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from rva.ari import AriClient
+from rva.ari import AriClient, build_originate_query
 from rva.dialer import (
     DialerError,
     build_endpoint,
@@ -18,7 +18,6 @@ from rva.dialer import (
     is_fictional_acme_msisdn,
     load_acme_campaign,
     normalize_msisdn,
-    originate_query,
     run_acme_campaign,
 )
 
@@ -32,6 +31,12 @@ def test_bundled_csv_is_fictional_only() -> None:
     assert len(contacts) >= 2
     for contact in contacts:
         assert is_fictional_acme_msisdn(contact.msisdn)
+
+
+def test_bundled_csv_has_trailing_newline() -> None:
+    path = default_campaign_csv()
+    raw = path.read_bytes()
+    assert raw.endswith(b"\n") or raw.endswith(b"\r\n")
 
 
 def test_normalize_msisdn_accepts_spaced_colombia() -> None:
@@ -56,11 +61,25 @@ def test_build_endpoint_default() -> None:
     assert build_endpoint("+573000000001") == "Local/573000000001@acme-campaign"
 
 
-def test_originate_query_includes_app_args() -> None:
-    q = originate_query("Local/x@acme-campaign", "rva", ["uuid-1", "uuid-2"])
+def test_build_originate_query_includes_app_args() -> None:
+    q = build_originate_query("Local/x@acme-campaign", "rva", ["uuid-1", "uuid-2"])
     assert "endpoint=Local" in q
     assert "app=rva" in q
     assert q.count("appArgs=") == 2
+
+
+def test_acme_campaign_dialplan_answers_without_stasis() -> None:
+    text = (_REPO / "deploy" / "asterisk" / "etc" / "extensions.conf").read_text(encoding="utf-8")
+    assert "[acme-campaign]" in text
+    block = text.split("[acme-campaign]", 1)[1].split("[", 1)[0]
+    assert "Answer()" in block
+    assert "Return()" in block
+    assert "Stasis(rva" not in block
+
+
+def test_audiosocket_uses_channel_variable() -> None:
+    text = (_REPO / "deploy" / "asterisk" / "etc" / "extensions.conf").read_text(encoding="utf-8")
+    assert "AudioSocket(${RVA_AUDIO_SOCKET_UUID}" in text
 
 
 class _Store:
@@ -68,8 +87,9 @@ class _Store:
         self.posts: list[str] = []
 
 
-def _server(store: _Store) -> ThreadingHTTPServer:
+def _server(store: _Store, *, fail_after: int | None = None) -> ThreadingHTTPServer:
     channel_ids = iter(["chan-a", "chan-b", "chan-c"])
+    attempts = {"n": 0}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, _fmt: str, *_args: object) -> None:
@@ -86,6 +106,10 @@ def _server(store: _Store) -> ThreadingHTTPServer:
             store.posts.append(self.path)
             path = self.path.split("?", 1)[0]
             if path == "/ari/channels":
+                attempts["n"] += 1
+                if fail_after is not None and attempts["n"] > fail_after:
+                    self._raw(500, b'{"error":"boom"}', "application/json")
+                    return
                 chan = next(channel_ids, "chan-z")
                 body = json.dumps({"id": chan, "state": "Down"}).encode()
                 self._raw(200, body)
@@ -96,9 +120,9 @@ def _server(store: _Store) -> ThreadingHTTPServer:
                 return
             self._raw(404, b"{}")
 
-        def _raw(self, code: int, body: bytes) -> None:
+        def _raw(self, code: int, body: bytes, content_type: str = "application/json") -> None:
             self.send_response(code)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -122,6 +146,7 @@ def test_run_acme_campaign_originates_each_contact(tmp_path: Path) -> None:
         client = AriClient(f"http://{_LOOP}:{port}", "rva", "rva-ari-demo")
         results = run_acme_campaign(client, contacts)
         assert len(results) == 2
+        assert all(len(r.audio_uuid) == 36 and "-" in r.audio_uuid for r in results)
         assert all(r.channel_id.startswith("chan-") for r in results)
         assert len(store.posts) == 2
         for post, contact in zip(store.posts, contacts, strict=True):
@@ -130,6 +155,28 @@ def test_run_acme_campaign_originates_each_contact(tmp_path: Path) -> None:
             assert qs["app"] == ["rva"]
             assert qs["endpoint"] == [build_endpoint(contact.msisdn)]
             assert qs["appArgs"]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_campaign_collects_partial_on_mid_run_failure(tmp_path: Path) -> None:
+    csv_path = tmp_path / "mini.csv"
+    csv_path.write_text(
+        "msisdn,name\n+57 300 000 0001,A\n+57 300 000 0002,B\n",
+        encoding="utf-8",
+    )
+    contacts = load_acme_campaign(csv_path)
+    store = _Store()
+    server = _server(store, fail_after=1)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        client = AriClient(f"http://{_LOOP}:{port}", "rva", "rva-ari-demo")
+        with pytest.raises(DialerError, match="1 originate failure") as exc:
+            run_acme_campaign(client, contacts)
+        assert len(exc.value.originated) == 1
     finally:
         server.shutdown()
         server.server_close()
@@ -168,9 +215,3 @@ def test_campaign_limit_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     finally:
         server.shutdown()
         server.server_close()
-
-
-def test_extensions_include_acme_campaign_context() -> None:
-    text = (_REPO / "deploy" / "asterisk" / "etc" / "extensions.conf").read_text(encoding="utf-8")
-    assert "[acme-campaign]" in text
-    assert "57300000" in text

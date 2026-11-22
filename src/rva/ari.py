@@ -9,17 +9,19 @@ from __future__ import annotations
 import base64
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from json import JSONDecodeError
 from typing import Protocol
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from rva.colab import activate_call_pin, release_call_pin
 from rva.session import CallSession
 
 _APP = "rva"
+AUDIO_SOCKET_VAR = "RVA_AUDIO_SOCKET_UUID"
+DEFAULT_AUDIO_SOCKET_UUID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 
 
 class AriError(ValueError):
@@ -28,6 +30,8 @@ class AriError(ValueError):
 
 class AriRest(Protocol):
     def continue_channel(self, channel_id: str, context: str, exten: str) -> None: ...
+
+    def set_channel_var(self, channel_id: str, variable: str, value: str) -> None: ...
 
 
 def _env(name: str) -> str | None:
@@ -93,12 +97,15 @@ class AriClient:
         query = urlencode({"context": context, "extension": exten, "priority": "1"})
         self._post(f"{path}?{query}")
 
+    def set_channel_var(self, channel_id: str, variable: str, value: str) -> None:
+        var = quote(variable, safe="")
+        enc = quote(value, safe="")
+        path = f"/ari/channels/{channel_id}/variable/{var}?value={enc}"
+        self._put(path)
+
     def originate_channel(self, endpoint: str, app_args: list[str] | tuple[str, ...]) -> str:
         """POST /ari/channels for an outbound originate into this Stasis app."""
-        params: list[tuple[str, str]] = [("endpoint", endpoint), ("app", self.app)]
-        for arg in app_args:
-            params.append(("appArgs", arg))
-        query = urlencode(params)
+        query = build_originate_query(endpoint, self.app, app_args)
         data = self._post_json(f"/ari/channels?{query}")
         channel_id = data.get("id")
         if not isinstance(channel_id, str) or not channel_id:
@@ -120,6 +127,10 @@ class AriClient:
     def _post_json(self, path: str) -> dict[str, object]:
         req = Request(self.base_url + path, data=b"", headers=self._headers(), method="POST")
         return self._json(req)
+
+    def _put(self, path: str) -> None:
+        req = Request(self.base_url + path, data=b"", headers=self._headers(), method="PUT")
+        self._json(req, allow_empty=True)
 
     def _json(self, req: Request, allow_empty: bool = False) -> dict[str, object]:
         try:
@@ -172,6 +183,8 @@ class AriApp:
             audio_uuid = _stasis_uuid(event)
             session = self._factory()
             if self.rest is not None:
+                socket_uuid = audiosocket_uuid(audio_uuid)
+                self.rest.set_channel_var(channel_id, AUDIO_SOCKET_VAR, socket_uuid)
                 self.rest.continue_channel(channel_id, self.continue_context, self.continue_exten)
             activate_call_pin()
             self.sessions[channel_id] = session
@@ -198,3 +211,20 @@ def _stasis_uuid(event: dict[str, object]) -> str | None:
     if isinstance(args, list) and args and isinstance(args[0], str) and args[0]:
         return args[0]
     return None
+
+
+def audiosocket_uuid(stasis_arg: str | None) -> str:
+    if not stasis_arg:
+        return DEFAULT_AUDIO_SOCKET_UUID
+    compact = stasis_arg.replace("-", "")
+    if len(compact) == 32 and all(ch in "0123456789abcdefABCDEF" for ch in compact):
+        low = compact.lower()
+        return f"{low[0:8]}-{low[8:12]}-{low[12:16]}-{low[16:20]}-{low[20:32]}"
+    return stasis_arg
+
+
+def build_originate_query(endpoint: str, app: str, app_args: Sequence[str]) -> str:
+    params: list[tuple[str, str]] = [("endpoint", endpoint), ("app", app)]
+    for arg in app_args:
+        params.append(("appArgs", arg))
+    return urlencode(params)

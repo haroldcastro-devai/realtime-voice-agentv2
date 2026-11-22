@@ -6,9 +6,14 @@ import argparse
 import json
 import sys
 
-from rva.ari import AriClient
+from rva.ari import AriClient, AriError
 from rva.colab import ColabOrchestrator
-from rva.dialer import campaign_csv_from_env, load_acme_campaign, run_acme_campaign
+from rva.dialer import (
+    DialerError,
+    campaign_csv_from_env,
+    load_acme_campaign,
+    run_acme_campaign,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -39,20 +44,42 @@ def _dialer_originate(args: argparse.Namespace) -> int:
     from pathlib import Path
 
     path = Path(args.csv) if args.csv else campaign_csv_from_env()
-    contacts = load_acme_campaign(path)
-    client = AriClient.from_env()
-    client.register()
-    results = run_acme_campaign(client, contacts)
-    payload = [
-        {
-            "msisdn": row.msisdn,
-            "channel_id": row.channel_id,
-            "endpoint": row.endpoint,
-            "audio_uuid": row.audio_uuid,
+    try:
+        contacts = load_acme_campaign(path)
+        client = AriClient.from_env()
+        client.register()
+        results = run_acme_campaign(client, contacts)
+    except (DialerError, AriError) as exc:
+        partial = getattr(exc, "originated", None) or []
+        payload = {
+            "error": str(exc),
+            "campaign_csv": str(path),
+            "originated": [
+                {
+                    "msisdn": row.msisdn,
+                    "channel_id": row.channel_id,
+                    "endpoint": row.endpoint,
+                    "audio_uuid": row.audio_uuid,
+                }
+                for row in partial
+            ],
         }
-        for row in results
-    ]
-    json.dump({"campaign_csv": str(path), "originated": payload}, sys.stdout, indent=2)
+        json.dump(payload, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 1
+    payload = {
+        "campaign_csv": str(path),
+        "originated": [
+            {
+                "msisdn": row.msisdn,
+                "channel_id": row.channel_id,
+                "endpoint": row.endpoint,
+                "audio_uuid": row.audio_uuid,
+            }
+            for row in results
+        ],
+    }
+    json.dump(payload, sys.stdout, indent=2)
     sys.stdout.write("\n")
     return 0
 

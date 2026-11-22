@@ -38,7 +38,7 @@ def test_extension_1000_stasis_then_audiosocket() -> None:
     assert "exten => 1000," in text
     assert f"Stasis(rva,{_AUDIO_UUID})" in text
     assert "[audiosocket]" in text
-    assert f"AudioSocket({_AUDIO_UUID},host.docker.internal:8090)" in text
+    assert "AudioSocket(${RVA_AUDIO_SOCKET_UUID},host.docker.internal:8090)" in text
     assert "Answer()" in text
 
 
