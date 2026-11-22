@@ -64,8 +64,8 @@ GUI softphone, extension **1000**, listener on `0.0.0.0:8090`).
 
 ## Roadmap
 
-Colab NeMo worker, dialer, dashboard, and measured benchmarks. Tracked in
-Jira project NAT.
+Local orchestrator health/backoff, HTTPS tunnel how-to, campaign dialer, dashboard UI,
+and measured benchmarks. Tracked in Jira project NAT.
 
 ## License
 
