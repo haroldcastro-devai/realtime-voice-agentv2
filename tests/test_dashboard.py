@@ -26,9 +26,7 @@ from rva.transcript_feed import TRANSCRIPT_FEED
 _LOOP = "127.0.0.1"
 
 
-def _get(
-    path: str, port: int, headers: dict[str, str] | None = None
-) -> tuple[int, bytes]:
+def _get(path: str, port: int, headers: dict[str, str] | None = None) -> tuple[int, bytes]:
     conn = HTTPConnection(_LOOP, port, timeout=5)
     try:
         conn.request("GET", path, headers=headers or {})
