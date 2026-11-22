@@ -13,7 +13,7 @@ from collections.abc import Callable, Sequence
 from json import JSONDecodeError
 from typing import Protocol
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from rva.colab import activate_call_pin, release_call_pin
@@ -98,10 +98,8 @@ class AriClient:
         self._post(f"{path}?{query}")
 
     def set_channel_var(self, channel_id: str, variable: str, value: str) -> None:
-        var = quote(variable, safe="")
-        enc = quote(value, safe="")
-        path = f"/ari/channels/{channel_id}/variable/{var}?value={enc}"
-        self._put(path)
+        query = urlencode({"variable": variable, "value": value})
+        self._post(f"/ari/channels/{channel_id}/variable?{query}")
 
     def originate_channel(self, endpoint: str, app_args: list[str] | tuple[str, ...]) -> str:
         """POST /ari/channels for an outbound originate into this Stasis app."""
@@ -127,10 +125,6 @@ class AriClient:
     def _post_json(self, path: str) -> dict[str, object]:
         req = Request(self.base_url + path, data=b"", headers=self._headers(), method="POST")
         return self._json(req)
-
-    def _put(self, path: str) -> None:
-        req = Request(self.base_url + path, data=b"", headers=self._headers(), method="PUT")
-        self._json(req, allow_empty=True)
 
     def _json(self, req: Request, allow_empty: bool = False) -> dict[str, object]:
         try:

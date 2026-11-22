@@ -60,18 +60,13 @@ def _server(store: _Store, *, info: str = "ok") -> ThreadingHTTPServer:
                 return
             self._raw(404, b"{}", "application/json")
 
-        def do_PUT(self) -> None:
-            path = self.path.split("?", 1)[0]
-            store.posts.append(self.path)
-            if "/variable/" in path:
-                self.send_response(204)
-                self.end_headers()
-                return
-            self._raw(404, b"{}", "application/json")
-
         def do_POST(self) -> None:
             path = self.path.split("?", 1)[0]
             store.posts.append(self.path)
+            if path.startswith("/ari/channels/") and path.endswith("/variable"):
+                self.send_response(204)
+                self.end_headers()
+                return
             if path.startswith("/ari/channels/") and path.endswith("/continue"):
                 self.send_response(204)
                 self.end_headers()
@@ -281,6 +276,22 @@ def test_audiosocket_uuid_formats_hex_app_args() -> None:
     )
     assert audiosocket_uuid(_AUDIO_UUID) == _AUDIO_UUID
     assert audiosocket_uuid(None) == DEFAULT_AUDIO_SOCKET_UUID
+
+
+def test_set_channel_var_posts_ari_variable() -> None:
+    store = _Store()
+    server = _server(store)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        client = AriClient(f"http://{_LOOP}:{port}", "rva", "rva-ari-demo")
+        client.set_channel_var("chan-1", AUDIO_SOCKET_VAR, _AUDIO_UUID)
+        assert any("/variable" in p.split("?", 1)[0] for p in store.posts)
+        assert f"variable={AUDIO_SOCKET_VAR}" in store.posts[-1]
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_build_originate_query() -> None:

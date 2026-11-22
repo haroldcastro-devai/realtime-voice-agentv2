@@ -27,6 +27,6 @@ Keep the agent AudioSocket listener on `0.0.0.0:8090` before dialing **1000**. B
 
 ARI: set `RVA_ARI_*` from `.env.example`. `AriClient.register()` checks `/ari/asterisk/info`; `AriApp.handle_event` starts a `CallSession` on `StasisStart` and continues the channel into `[audiosocket]`.
 
-Fictional campaign originate (not smoke, not CI): with ARI up, run `rva dialer originate` on the host. It reads `deploy/dialer/acme_campaign.csv` (`+57 300 000 0xxx` only) and POSTs `/ari/channels` with `Local/digits@acme-campaign` and `app=rva` (one Stasis entry per call). `[acme-campaign]` only `Answer()`/`Return()`; `AriApp` sets `RVA_AUDIO_SOCKET_UUID` before continue into `[audiosocket]`.
+Fictional campaign originate (not smoke, not CI): with ARI up, run `rva dialer originate` on the host. It reads `deploy/dialer/acme_campaign.csv` (`+57 300 000 0xxx` only) and POSTs `/ari/channels` with `Local/digits@acme-campaign` and `app=rva` (one Stasis entry per call). `[acme-campaign]` only `Answer()`/`Wait(600)` (no dialplan Stasis); `AriApp` sets `RVA_AUDIO_SOCKET_UUID` before continue into `[audiosocket]` (default UUID if unset).
 
 Stop with `docker compose down`.
