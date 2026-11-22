@@ -26,6 +26,7 @@ customer data.
 - Local Asterisk in Docker (`deploy/asterisk`): PJSIP on `127.0.0.1:5060`, extension **1000** → Stasis(`rva`) then AudioSocket; no cloud PBX
 - ARI hook (`rva.ari`): app `rva` registers over HTTP; `StasisStart` starts a `CallSession` (fake ARI server in tests)
 - Softphone / pjsua smoke ([deploy/asterisk/SMOKE.md](deploy/asterisk/SMOKE.md)): manual steps and `scripts/audiosocket_smoke_stub.py`; not run in CI
+- Colab NeMo Spanish worker ([colab/README.md](colab/README.md), [notebooks/colab_nemo_es.ipynb](notebooks/colab_nemo_es.ipynb)): GPU STT/TTS, Bearer + HTTPS URL printed in notebook; not run in CI
 
 The full agent TCP listener and dashboard UI are later issues. This repo already exposes the metrics JSON.
 
