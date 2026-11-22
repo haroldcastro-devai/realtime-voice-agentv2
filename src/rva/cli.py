@@ -20,7 +20,12 @@ from rva.dialer import (
     load_acme_campaign,
     run_acme_campaign_jobs,
 )
-from rva.recordings import RecordingArchive, minio_bucket_name, recordings_enabled
+from rva.recordings import (
+    RecordingArchive,
+    minio_bucket_name,
+    recording_backend_modes,
+    recordings_enabled,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -124,6 +129,7 @@ def _recordings_status(_args: argparse.Namespace) -> int:
         "enabled": recordings_enabled(),
         "bucket": minio_bucket_name(),
         "archive_active": archive.enabled,
+        "backends": recording_backend_modes(),
     }
     json.dump(payload, sys.stdout, indent=2)
     sys.stdout.write("\n")
