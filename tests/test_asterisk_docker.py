@@ -24,6 +24,7 @@ def test_compose_publishes_sip_on_loopback_only() -> None:
     text = COMPOSE.read_text(encoding="utf-8")
     assert "127.0.0.1:5060:5060/udp" in text
     assert "127.0.0.1:5060:5060/tcp" not in text
+    assert "127.0.0.1:8088:8088" in text
     assert "127.0.0.1:10000-10020:10000-10020/udp" in text
     assert f"andrius/asterisk:20@{_IMAGE_DIGEST}" in text
     assert "host.docker.internal:host-gateway" in text
@@ -32,9 +33,11 @@ def test_compose_publishes_sip_on_loopback_only() -> None:
         assert needle not in lowered
 
 
-def test_extension_1000_audiosocket_to_host_agent() -> None:
+def test_extension_1000_stasis_then_audiosocket() -> None:
     text = EXTENSIONS.read_text(encoding="utf-8")
     assert "exten => 1000," in text
+    assert f"Stasis(rva,{_AUDIO_UUID})" in text
+    assert "[audiosocket]" in text
     assert f"AudioSocket({_AUDIO_UUID},host.docker.internal:8090)" in text
     assert "Answer()" in text
 
@@ -70,8 +73,27 @@ def test_modules_load_pjsip_and_audiosocket() -> None:
         "chan_pjsip.so",
         "res_audiosocket.so",
         "app_audiosocket.so",
+        "res_http_websocket.so",
+        "res_ari.so",
+        "res_ari_model.so",
+        "res_ari_events.so",
+        "res_ari_channels.so",
+        "res_ari_asterisk.so",
     ):
         assert f"load => {name}" in text
+
+
+def test_ari_http_enabled_on_loopback_publish() -> None:
+    http = (AST / "etc" / "http.conf").read_text(encoding="utf-8")
+    ari = (AST / "etc" / "ari.conf").read_text(encoding="utf-8")
+    env = ENV_EXAMPLE.read_text(encoding="utf-8")
+    assert "enabled=yes" in http
+    assert "bindport=8088" in http
+    assert "bindaddr=0.0.0.0" in http
+    assert "[rva]" in ari
+    assert "password=rva-ari-demo" in ari
+    assert "RVA_ARI_URL=http://127.0.0.1:8088" in env
+    assert "RVA_ARI_APP=rva" in env
 
 
 def test_docs_name_extension_and_loopback() -> None:
@@ -82,3 +104,5 @@ def test_docs_name_extension_and_loopback() -> None:
     assert "docker compose up" in text
     assert "No cloud PBX" in text
     assert "UDP only" in text
+    assert "127.0.0.1:8088" in text
+    assert "Stasis(rva)" in text

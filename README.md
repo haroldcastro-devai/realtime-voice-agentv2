@@ -23,9 +23,10 @@ customer data.
 - OpenAI-compatible HTTP STT/LLM/TTS (`rva.http_backends`): mapping tests use a local fake server
 - Per-stage p50/p95 (`rva.metrics`): in-memory STT/LLM/TTS/total samples; `GET /metrics` on loopback JSON (no transcripts)
 - Sentence TTS prefetch (`rva.prefetch`): synthesize sentence N+1 while N plays; heard order is unchanged
-- Local Asterisk in Docker (`deploy/asterisk`): PJSIP on `127.0.0.1:5060`, extension **1000** → AudioSocket to the agent; no cloud PBX
+- Local Asterisk in Docker (`deploy/asterisk`): PJSIP on `127.0.0.1:5060`, extension **1000** → Stasis(`rva`) then AudioSocket; no cloud PBX
+- ARI hook (`rva.ari`): app `rva` registers over HTTP; `StasisStart` starts a `CallSession` (fake ARI server in tests)
 
-Call-handling TCP listener, ARI, and a softphone smoke script are later issues. The dashboard UI is a later issue; this repo already exposes the metrics JSON.
+Call-handling TCP listener and a softphone smoke script are later issues. The dashboard UI is a later issue; this repo already exposes the metrics JSON.
 
 ## Setup
 
@@ -61,7 +62,7 @@ dial **1000**. Listen on `0.0.0.0:8090`; the container uses `host.docker.interna
 
 ## Roadmap
 
-ARI, Colab NeMo worker, dialer, dashboard, and measured benchmarks. Tracked in
+Colab NeMo worker, dialer, dashboard, and measured benchmarks. Tracked in
 Jira project NAT.
 
 ## License
