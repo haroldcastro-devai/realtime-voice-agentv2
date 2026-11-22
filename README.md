@@ -25,8 +25,9 @@ customer data.
 - Sentence TTS prefetch (`rva.prefetch`): synthesize sentence N+1 while N plays; heard order is unchanged
 - Local Asterisk in Docker (`deploy/asterisk`): PJSIP on `127.0.0.1:5060`, extension **1000** → Stasis(`rva`) then AudioSocket; no cloud PBX
 - ARI hook (`rva.ari`): app `rva` registers over HTTP; `StasisStart` starts a `CallSession` (fake ARI server in tests)
+- Softphone / pjsua smoke ([deploy/asterisk/SMOKE.md](deploy/asterisk/SMOKE.md)): manual steps and `scripts/audiosocket_smoke_stub.py`; not run in CI
 
-Call-handling TCP listener and a softphone smoke script are later issues. The dashboard UI is a later issue; this repo already exposes the metrics JSON.
+The full agent TCP listener and dashboard UI are later issues. This repo already exposes the metrics JSON.
 
 ## Setup
 
@@ -56,9 +57,9 @@ python scripts/check_clean.py
 
 ## Local Asterisk
 
-See [deploy/asterisk/README.md](deploy/asterisk/README.md). From that directory:
-`docker compose up`, register a softphone as `ava` / `rva-demo` at `127.0.0.1`,
-dial **1000**. Listen on `0.0.0.0:8090`; the container uses `host.docker.internal:8090`.
+See [deploy/asterisk/README.md](deploy/asterisk/README.md) and [SMOKE.md](deploy/asterisk/SMOKE.md).
+From `deploy/asterisk`: `docker compose up`, then follow the smoke doc (pjsua or a
+GUI softphone, extension **1000**, listener on `0.0.0.0:8090`).
 
 ## Roadmap
 

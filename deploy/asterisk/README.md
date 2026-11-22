@@ -13,7 +13,7 @@ Fictional **Acme Telco** / **Ava** demo. Runs on the developer machine. No cloud
 | Agent socket | listen `0.0.0.0:8090` (`RVA_AUDIOSOCKET_HOST` / `RVA_AUDIOSOCKET_PORT`) so `host-gateway` can connect |
 | From the container | `host.docker.internal:8090` |
 
-The agent TCP listener and a pjsua smoke call are later issues (NAT-26).
+Manual softphone / pjsua smoke: [SMOKE.md](SMOKE.md) (not CI).
 
 ## Start
 
