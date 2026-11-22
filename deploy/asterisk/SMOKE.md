@@ -7,13 +7,18 @@ start Asterisk, pjsua, or Docker for this story.
 
 1. [deploy/asterisk/README.md](README.md): `docker compose up` (Asterisk on loopback).
 2. Agent AudioSocket listener on `0.0.0.0:8090` (see `.env.example` `RVA_AUDIOSOCKET_*`).
-3. Optional stub (no full agent yet):
+3. **ARI app `rva` running** against `http://127.0.0.1:8088` with `RVA_ARI_*` from
+   `.env.example`. On `StasisStart`, the app must `continue` the channel into dialplan
+   context `[audiosocket]` (see `src/rva/ari.py`). Without it, extension **1000** stops
+   in Stasis and never reaches AudioSocket.
+4. Optional stub (no full agent yet):
 
 ```bash
 python scripts/audiosocket_smoke_stub.py
 ```
 
-The stub accepts one TCP connection and prints each AudioSocket frame until hangup.
+The stub binds IPv4 only (`0.0.0.0` or `127.0.0.1`), accepts one TCP connection, and
+prints each AudioSocket frame until hangup.
 
 ## Register and dial
 
@@ -24,11 +29,15 @@ The stub accepts one TCP connection and prints each AudioSocket frame until hang
 | Password | `rva-demo` (demo only) |
 | Dial | **1000** |
 
-Expected path: answer → `Stasis(rva)` → ARI continues to AudioSocket → TCP to
-`host.docker.internal:8090` with UUID `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`.
+Expected path (matches `deploy/asterisk/etc/extensions.conf`):
 
-Success: the stub logs a UUID frame (and later PCM or hangup). Asterisk logs show
-the channel entering Stasis and AudioSocket.
+1. Inbound **1000** → `Stasis(rva,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa)` (no `Answer()` yet).
+2. ARI `StasisStart` → RVA app calls **continue** into `[audiosocket]` extension `s`.
+3. `[audiosocket]` → `Answer()` → `AudioSocket(...,host.docker.internal:8090)` → TCP to
+   your listener with UUID `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`.
+
+Success: the stub logs a UUID frame (and later PCM or hangup). Asterisk logs show Stasis,
+then AudioSocket.
 
 ## pjsua (CLI)
 
@@ -60,7 +69,8 @@ Any local softphone (Linphone, MicroSIP, Zoiper, etc.):
   container cannot reach the host (`host.docker.internal` / `host-gateway`).
 - **Registration fails:** confirm `127.0.0.1:5060/udp` and credentials match
   `deploy/asterisk/etc/pjsip.conf`.
-- **ARI path stuck:** run the RVA ARI app (later wiring); for smoke, direct dialplan
-  continue still reaches AudioSocket once the channel is in `[audiosocket]`.
+- **Stuck in Stasis / no AudioSocket:** confirm the ARI app is registered (`RVA_ARI_APP=rva`)
+  and that `continue` targets context `audiosocket` extension `s` (see `tests/test_ari.py`).
+- **401 on ARI:** use demo user `rva` / `rva-ari-demo` from `deploy/asterisk/etc/ari.conf`.
 
 Out of scope: automating this flow in CI, campaign dialer, measured latency.

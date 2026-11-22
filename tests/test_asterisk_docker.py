@@ -1,6 +1,6 @@
 """Local Asterisk compose + dialplan: loopback SIP, AudioSocket, no cloud PBX.
 
-Does not start Docker or Asterisk (that stays a later smoke-doc issue).
+Does not start Docker or Asterisk. Manual smoke steps live in deploy/asterisk/SMOKE.md.
 """
 
 from __future__ import annotations

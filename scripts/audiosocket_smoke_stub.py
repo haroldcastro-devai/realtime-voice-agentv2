@@ -86,8 +86,9 @@ def main(argv: list[str] | None = None) -> int:
         help="seconds to wait for TCP and read",
     )
     args = parser.parse_args(argv)
-    if args.host not in ("0.0.0.0", "127.0.0.1", "::1"):
-        print("audiosocket_smoke_stub: bind loopback or 0.0.0.0 only", file=sys.stderr)
+    # IPv4 only (serve_once uses AF_INET).
+    if args.host not in ("0.0.0.0", "127.0.0.1"):
+        print("audiosocket_smoke_stub: bind 0.0.0.0 or 127.0.0.1 only", file=sys.stderr)
         return 2
     count = serve_once(args.host, args.port, accept_timeout_s=args.accept_timeout)
     print(f"audiosocket_smoke: ok ({count} frames)", flush=True)

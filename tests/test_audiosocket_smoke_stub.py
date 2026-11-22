@@ -6,8 +6,9 @@ import socket
 import threading
 import time
 import uuid
+from unittest.mock import patch
 
-from scripts.audiosocket_smoke_stub import read_frames_until_hangup, serve_once
+from scripts.audiosocket_smoke_stub import main, read_frames_until_hangup, serve_once
 
 from rva.audiosocket import HANGUP, UUID, pack_frame
 
@@ -53,3 +54,27 @@ def test_serve_once_reads_uuid_then_hangup() -> None:
     server.join(timeout=6.0)
     client.join(timeout=6.0)
     assert count_box == [2]
+
+
+def test_main_rejects_non_loopback_bind() -> None:
+    assert main(["--host", "public.invalid", "--port", "0"]) == 2
+
+
+def test_main_rejects_ipv6_loopback() -> None:
+    assert main(["--host", "::1", "--port", "0"]) == 2
+
+
+def test_main_uses_rva_audiosocket_env(monkeypatch) -> None:
+    monkeypatch.setenv("RVA_AUDIOSOCKET_HOST", "127.0.0.1")
+    monkeypatch.setenv("RVA_AUDIOSOCKET_PORT", "18090")
+    with patch("scripts.audiosocket_smoke_stub.serve_once", return_value=1) as mocked:
+        assert main(["--accept-timeout", "1"]) == 0
+    mocked.assert_called_once_with("127.0.0.1", 18090, accept_timeout_s=1.0)
+
+
+def test_main_env_change_me_uses_ipv4_defaults(monkeypatch) -> None:
+    monkeypatch.setenv("RVA_AUDIOSOCKET_HOST", "CHANGE_ME")
+    monkeypatch.setenv("RVA_AUDIOSOCKET_PORT", "not-a-port")
+    with patch("scripts.audiosocket_smoke_stub.serve_once", return_value=0) as mocked:
+        assert main([]) == 0
+    mocked.assert_called_once_with("0.0.0.0", 8090, accept_timeout_s=60.0)
