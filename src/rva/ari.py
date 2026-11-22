@@ -16,6 +16,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from rva.colab import activate_call_pin, release_call_pin
 from rva.session import CallSession
 
 _APP = "rva"
@@ -154,6 +155,7 @@ class AriApp:
                 raise AriError("StasisStart missing channel id")
             audio_uuid = _stasis_uuid(event)
             session = self._factory()
+            activate_call_pin()
             if self.rest is not None:
                 self.rest.continue_channel(channel_id, self.continue_context, self.continue_exten)
             self.sessions[channel_id] = session
@@ -167,6 +169,7 @@ class AriApp:
                 if isinstance(channel_id, str):
                     session = self.sessions.pop(channel_id, None)
                     if session is not None:
+                        release_call_pin()
                         for key, value in list(self.by_uuid.items()):
                             if value is session:
                                 self.by_uuid.pop(key, None)

@@ -9,6 +9,7 @@ from threading import Thread
 import pytest
 
 from rva.ari import AriApp, AriClient, AriError
+from rva.colab import ColabOrchestrator
 from rva.session import CallSession
 
 _LOOP = "127.0.0.1"
@@ -77,6 +78,21 @@ def _stasis_start(channel_id: str = "ch-1") -> dict[str, object]:
         "args": [_AUDIO_UUID],
         "channel": {"id": channel_id, "state": "Up"},
     }
+
+
+def test_stasis_start_pins_colab_when_http_backends(monkeypatch) -> None:
+    ColabOrchestrator.reset_shared_for_tests()
+    monkeypatch.setenv("RVA_COLAB_URL", "http://127.0.0.1:9")
+    monkeypatch.setenv("RVA_STT_BACKEND", "http")
+    app = AriApp()
+    app.handle_event(_stasis_start("chan-pin"))
+    snap = ColabOrchestrator.shared().refresh()
+    assert snap.in_call is True
+    assert snap.pinned_remote is True
+    app.handle_event({"type": "StasisEnd", "channel": {"id": "chan-pin"}})
+    snap = ColabOrchestrator.shared().refresh()
+    assert snap.in_call is False
+    ColabOrchestrator.reset_shared_for_tests()
 
 
 def test_stasis_start_creates_call_session_and_continues() -> None:

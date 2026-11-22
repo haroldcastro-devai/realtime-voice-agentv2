@@ -6,11 +6,21 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
+import pytest
+
 from rva.cli import main as rva_main
 from rva.colab import ColabOrchestrator, backoff_seconds, probe_colab_health
+from rva.http_backends import HttpStt
 from rva.pipeline import MockStt, build_pipeline
 
 _LOOP = "127.0.0.1"
+
+
+@pytest.fixture(autouse=True)
+def _reset_colab_singleton() -> None:
+    ColabOrchestrator.reset_shared_for_tests()
+    yield
+    ColabOrchestrator.reset_shared_for_tests()
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
@@ -85,6 +95,25 @@ def test_orchestrator_fallback_after_failure(monkeypatch) -> None:
         assert snap.fallback_stt_tts is True
         pipe = build_pipeline(orchestrator=orch)
         assert isinstance(pipe.stt, MockStt)
+    finally:
+        server.shutdown()
+
+
+def test_build_pipeline_keeps_http_stt_when_pinned(monkeypatch) -> None:
+    server, _thread, handler = _server()
+    base = f"http://{_LOOP}:{server.server_address[1]}"
+    monkeypatch.setenv("RVA_COLAB_URL", base)
+    monkeypatch.setenv("RVA_COLAB_TOKEN", "test-token")
+    monkeypatch.setenv("RVA_STT_BACKEND", "http")
+    monkeypatch.setenv("RVA_STT_URL", base)
+    monkeypatch.setenv("RVA_TTS_BACKEND", "mock")
+    orch = ColabOrchestrator.shared()
+    orch.enter_call(remote_stt_tts=True)
+    handler.ok = False
+    handler.status_code = 503
+    try:
+        pipe = build_pipeline(orchestrator=orch)
+        assert isinstance(pipe.stt, HttpStt)
     finally:
         server.shutdown()
 
