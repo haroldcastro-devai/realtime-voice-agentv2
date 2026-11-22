@@ -29,6 +29,7 @@ customer data.
 - Colab NeMo Spanish worker ([colab/README.md](colab/README.md), [notebooks/colab_nemo_es.ipynb](notebooks/colab_nemo_es.ipynb)): GPU STT/TTS, Bearer + HTTPS URL printed in notebook; not run in CI
 - Colab orchestrator (`rva.colab`): probe `/health`, RTT, exponential backoff, `rva colab status`; HTTP STT/TTS fall back to mocks without unpinning an active call
 - HTTPS tunnel how-to ([colab/TUNNEL.md](colab/TUNNEL.md)): ngrok and Cloudflare; tunnel secrets stay in Colab Secrets / local `.env` only
+- Fictional Acme campaign dialer (`rva.dialer`): bundled CSV in `deploy/dialer/acme_campaign.csv`, `+57300000XXXX` only; `rva dialer originate` POSTs ARI `/ari/channels` (fake HTTP in tests)
 
 The full agent TCP listener and dashboard UI are later issues. This repo already exposes the metrics JSON.
 
@@ -66,7 +67,7 @@ GUI softphone, extension **1000**, listener on `0.0.0.0:8090`).
 
 ## Roadmap
 
-Campaign dialer, dashboard UI, and measured benchmarks.
+Dialer job states/retries, dashboard UI, and measured benchmarks.
 Tracked in Jira project NAT.
 
 ## License
