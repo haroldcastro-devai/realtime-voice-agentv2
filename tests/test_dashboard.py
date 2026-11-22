@@ -15,23 +15,32 @@ from rva.dashboard import (
     DashboardError,
     build_dashboard_snapshot,
     dashboard_url,
+    is_dashboard_authorized,
     serve_dashboard,
     shutdown_server,
 )
 from rva.metrics import StageMetrics
 from rva.pipeline import build_pipeline
+from rva.transcript_feed import TRANSCRIPT_FEED
 
 _LOOP = "127.0.0.1"
 
 
-def _get(path: str, port: int) -> tuple[int, bytes]:
+def _get(
+    path: str, port: int, headers: dict[str, str] | None = None
+) -> tuple[int, bytes]:
     conn = HTTPConnection(_LOOP, port, timeout=5)
     try:
-        conn.request("GET", path)
+        conn.request("GET", path, headers=headers or {})
         resp = conn.getresponse()
         return resp.status, resp.read()
     finally:
         conn.close()
+
+
+class _Hdr(dict):
+    def get(self, key: str, default: str | None = None) -> str | None:  # type: ignore[override]
+        return super().get(key, default)
 
 
 def test_build_snapshot_includes_calls_colab_and_latency() -> None:
@@ -155,3 +164,106 @@ def test_active_call_registry_concurrent_updates() -> None:
     for thread in threads:
         thread.join()
     assert REGISTRY.count() == 0
+
+
+def test_snapshot_includes_transcript_lines() -> None:
+    TRANSCRIPT_FEED.reset_for_tests()
+    StageMetrics.reset_shared_for_tests()
+    TRANSCRIPT_FEED.record_turn("hola", "Ava reply")
+    snap = build_dashboard_snapshot(StageMetrics.shared())
+    assert snap["transcript"] == [
+        {"role": "user", "text": "hola"},
+        {"role": "agent", "text": "Ava reply"},
+    ]
+
+
+def test_pipeline_records_transcript_when_env_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    TRANSCRIPT_FEED.reset_for_tests()
+    monkeypatch.setenv("RVA_DASHBOARD_TRANSCRIPT", "1")
+    pipe = build_pipeline()
+    pipe.turn(b"\x00" * 320, sample_rate=16_000)
+    lines = TRANSCRIPT_FEED.snapshot()
+    assert len(lines) == 2
+    assert lines[0]["role"] == "user"
+    assert lines[1]["role"] == "agent"
+
+
+def test_dashboard_token_optional_by_default() -> None:
+    server = serve_dashboard(StageMetrics(), host=_LOOP, port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        code, _ = _get("/api/dashboard", port)
+        assert code == 200
+    finally:
+        shutdown_server(server)
+
+
+def test_dashboard_token_rejects_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RVA_DASHBOARD_TOKEN", "local-dev-token")
+    server = serve_dashboard(StageMetrics(), host=_LOOP, port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        code, _ = _get("/api/dashboard", port)
+        assert code == 401
+    finally:
+        shutdown_server(server)
+    monkeypatch.delenv("RVA_DASHBOARD_TOKEN", raising=False)
+
+
+def test_dashboard_token_accepts_bearer_and_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RVA_DASHBOARD_TOKEN", "local-dev-token")
+    server = serve_dashboard(StageMetrics(), host=_LOOP, port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        code, _ = _get(
+            "/api/dashboard",
+            port,
+            headers={"Authorization": "Bearer local-dev-token"},
+        )
+        assert code == 200
+        code2, _ = _get("/api/dashboard?token=local-dev-token", port)
+        assert code2 == 200
+    finally:
+        shutdown_server(server)
+    monkeypatch.delenv("RVA_DASHBOARD_TOKEN", raising=False)
+
+
+def test_is_dashboard_authorized_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RVA_DASHBOARD_TOKEN", "abc")
+    headers = _Hdr({"Authorization": "Bearer abc"})
+    assert is_dashboard_authorized(headers, "/api/dashboard")
+    assert not is_dashboard_authorized(_Hdr({}), "/api/dashboard?token=wrong")
+
+
+def test_dashboard_html_transcript_uses_text_content_only() -> None:
+    server = serve_dashboard(StageMetrics(), host=_LOOP, port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        code, body = _get("/", port)
+        assert code == 200
+        text = body.decode("utf-8")
+        assert "renderTranscript" in text
+        assert "transcript_list" in text
+        assert "innerHTML" not in text
+    finally:
+        shutdown_server(server)
+
+
+def test_transcript_xss_payload_round_trips_as_plain_text() -> None:
+    payload = "<img src=x onerror=alert(1)>"
+    TRANSCRIPT_FEED.reset_for_tests()
+    TRANSCRIPT_FEED.record_turn(payload, "ok")
+    snap = build_dashboard_snapshot(StageMetrics())
+    assert snap["transcript"][0]["text"] == payload

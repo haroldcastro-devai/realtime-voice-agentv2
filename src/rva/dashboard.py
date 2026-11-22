@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 from rva.call_activity import REGISTRY
 from rva.colab import ColabOrchestrator
 from rva.metrics import LoopbackServer, StageMetrics, listen_family
+from rva.transcript_feed import TRANSCRIPT_FEED
 
 _LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
 _PANEL_HTML = """<!DOCTYPE html>
@@ -34,7 +37,14 @@ _PANEL_HTML = """<!DOCTYPE html>
     <thead><tr><th>Stage</th><th>n</th><th>p50</th><th>p95</th></tr></thead>
     <tbody id="latency_body"></tbody>
   </table>
+  <h2>Live transcript</h2>
+  <ul id="transcript_list"></ul>
   <script>
+    function authHeaders() {
+      const token = new URLSearchParams(location.search).get("token");
+      if (!token) return {};
+      return { Authorization: "Bearer " + token };
+    }
     function setText(id, value) {
       const el = document.getElementById(id);
       if (el) el.textContent = value;
@@ -53,9 +63,24 @@ _PANEL_HTML = """<!DOCTYPE html>
         body.appendChild(tr);
       }
     }
+    function renderTranscript(lines) {
+      const root = document.getElementById("transcript_list");
+      if (!root) return;
+      root.textContent = "";
+      for (const row of lines) {
+        const li = document.createElement("li");
+        const label = document.createElement("strong");
+        label.textContent = row.role + ": ";
+        li.appendChild(label);
+        const span = document.createElement("span");
+        span.textContent = row.text;
+        li.appendChild(span);
+        root.appendChild(li);
+      }
+    }
     async function refresh() {
       try {
-        const res = await fetch("/api/dashboard");
+        const res = await fetch("/api/dashboard", { headers: authHeaders() });
         if (!res.ok) {
           setText("status_error", "Dashboard API error: " + res.status);
           return;
@@ -66,6 +91,7 @@ _PANEL_HTML = """<!DOCTYPE html>
         setText("colab_status", data.colab.status);
         setText("colab_rtt", data.colab.rtt_ms == null ? "—" : String(data.colab.rtt_ms));
         renderLatency(data.latency_ms);
+        renderTranscript(data.transcript || []);
       } catch (err) {
         setText("status_error", "Fetch failed");
       }
@@ -100,6 +126,42 @@ def dashboard_port() -> int:
     return _env_int("RVA_DASHBOARD_PORT", 8765)
 
 
+def configured_dashboard_token() -> str | None:
+    raw = os.environ.get("RVA_DASHBOARD_TOKEN")
+    if raw is None or raw == "" or raw == "CHANGE_ME":
+        return None
+    return raw
+
+
+def dashboard_token_required() -> bool:
+    return configured_dashboard_token() is not None
+
+
+def _token_from_headers(headers: object) -> str | None:
+    auth = headers.get("Authorization") if hasattr(headers, "get") else None
+    if not auth or not auth.startswith("Bearer "):
+        return None
+    return auth[7:].strip() or None
+
+
+def _token_from_path(raw_path: str) -> str | None:
+    parsed = urlparse(raw_path)
+    values = parse_qs(parsed.query).get("token")
+    if not values:
+        return None
+    return values[0] or None
+
+
+def is_dashboard_authorized(headers: object, raw_path: str) -> bool:
+    expected = configured_dashboard_token()
+    if expected is None:
+        return True
+    provided = _token_from_headers(headers) or _token_from_path(raw_path)
+    if provided is None:
+        return False
+    return secrets.compare_digest(provided, expected)
+
+
 def dashboard_metrics(metrics: StageMetrics | None = None) -> StageMetrics:
     return metrics if metrics is not None else StageMetrics.shared()
 
@@ -123,6 +185,7 @@ def build_dashboard_snapshot(metrics: StageMetrics) -> dict[str, object]:
             "in_call": colab.in_call,
         },
         "latency_ms": metrics.snapshot(),
+        "transcript": TRANSCRIPT_FEED.snapshot(),
     }
 
 
@@ -150,6 +213,10 @@ def serve_dashboard(
 
         def do_GET(self) -> None:
             path = self.path.split("?", 1)[0]
+            if path in ("/", "/index.html", "/api/dashboard", "/metrics"):
+                if not is_dashboard_authorized(self.headers, self.path):
+                    self._send(401, b"unauthorized", "text/plain; charset=utf-8")
+                    return
             if path in ("/", "/index.html"):
                 body = _PANEL_HTML.encode("utf-8")
                 self._send(200, body, "text/html; charset=utf-8")
