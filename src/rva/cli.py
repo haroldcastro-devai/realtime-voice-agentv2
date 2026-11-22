@@ -6,18 +6,55 @@ import argparse
 import json
 import sys
 
+from rva.ari import AriClient
 from rva.colab import ColabOrchestrator
+from rva.dialer import campaign_csv_from_env, load_acme_campaign, run_acme_campaign
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="rva", description="Acme Telco / Ava agent tools")
     sub = parser.add_subparsers(dest="command", required=True)
+    dialer = sub.add_parser("dialer", help="Fictional Acme campaign dialer (ARI)")
+    dialer_sub = dialer.add_subparsers(dest="dialer_cmd", required=True)
+    originate = dialer_sub.add_parser(
+        "originate",
+        help="Originate Stasis calls from the bundled fictional CSV",
+    )
+    originate.add_argument(
+        "--csv",
+        type=str,
+        default=None,
+        help="Campaign CSV (default: deploy/dialer/acme_campaign.csv)",
+    )
+    originate.set_defaults(handler=_dialer_originate)
     colab = sub.add_parser("colab", help="Colab GPU worker")
     colab_sub = colab.add_subparsers(dest="colab_cmd", required=True)
     status = colab_sub.add_parser("status", help="Health, RTT, backoff, and fallback flags")
     status.set_defaults(handler=_colab_status)
     args = parser.parse_args(argv)
     return int(args.handler(args))
+
+
+def _dialer_originate(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    path = Path(args.csv) if args.csv else campaign_csv_from_env()
+    contacts = load_acme_campaign(path)
+    client = AriClient.from_env()
+    client.register()
+    results = run_acme_campaign(client, contacts)
+    payload = [
+        {
+            "msisdn": row.msisdn,
+            "channel_id": row.channel_id,
+            "endpoint": row.endpoint,
+            "audio_uuid": row.audio_uuid,
+        }
+        for row in results
+    ]
+    json.dump({"campaign_csv": str(path), "originated": payload}, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    return 0
 
 
 def _colab_status(_args: argparse.Namespace) -> int:

@@ -93,6 +93,18 @@ class AriClient:
         query = urlencode({"context": context, "extension": exten, "priority": "1"})
         self._post(f"{path}?{query}")
 
+    def originate_channel(self, endpoint: str, app_args: list[str] | tuple[str, ...]) -> str:
+        """POST /ari/channels for an outbound originate into this Stasis app."""
+        params: list[tuple[str, str]] = [("endpoint", endpoint), ("app", self.app)]
+        for arg in app_args:
+            params.append(("appArgs", arg))
+        query = urlencode(params)
+        data = self._post_json(f"/ari/channels?{query}")
+        channel_id = data.get("id")
+        if not isinstance(channel_id, str) or not channel_id:
+            raise AriError("originate response missing channel id")
+        return channel_id
+
     def _headers(self) -> dict[str, str]:
         token = base64.b64encode(f"{self.user}:{self.password}".encode()).decode("ascii")
         return {"Authorization": f"Basic {token}"}
@@ -104,6 +116,10 @@ class AriClient:
     def _post(self, path: str) -> None:
         req = Request(self.base_url + path, data=b"", headers=self._headers(), method="POST")
         self._json(req, allow_empty=True)
+
+    def _post_json(self, path: str) -> dict[str, object]:
+        req = Request(self.base_url + path, data=b"", headers=self._headers(), method="POST")
+        return self._json(req)
 
     def _json(self, req: Request, allow_empty: bool = False) -> dict[str, object]:
         try:
