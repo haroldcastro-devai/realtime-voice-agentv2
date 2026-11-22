@@ -17,6 +17,7 @@ from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from rva.colab import activate_call_pin, release_call_pin
+from rva.dashboard import REGISTRY
 from rva.session import CallSession
 
 _APP = "rva"
@@ -181,6 +182,7 @@ class AriApp:
                 self.rest.set_channel_var(channel_id, AUDIO_SOCKET_VAR, socket_uuid)
                 self.rest.continue_channel(channel_id, self.continue_context, self.continue_exten)
             activate_call_pin()
+            REGISTRY.on_stasis_start(channel_id)
             self.sessions[channel_id] = session
             if audio_uuid is not None:
                 self.by_uuid[audio_uuid] = session
@@ -193,6 +195,7 @@ class AriApp:
                     session = self.sessions.pop(channel_id, None)
                     if session is not None:
                         release_call_pin()
+                        REGISTRY.on_stasis_end(channel_id)
                         for key, value in list(self.by_uuid.items()):
                             if value is session:
                                 self.by_uuid.pop(key, None)

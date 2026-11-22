@@ -8,12 +8,14 @@ import sys
 
 from rva.ari import AriClient, AriError
 from rva.colab import ColabOrchestrator
+from rva.dashboard import DashboardError, serve_dashboard
 from rva.dialer import (
     DialerError,
     campaign_csv_from_env,
     load_acme_campaign,
     run_acme_campaign_jobs,
 )
+from rva.metrics import MetricsError, StageMetrics
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,6 +34,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Campaign CSV (default: deploy/dialer/acme_campaign.csv)",
     )
     originate.set_defaults(handler=_dialer_originate)
+    panel = sub.add_parser("dashboard", help="Local loopback status panel")
+    panel_sub = panel.add_subparsers(dest="dashboard_cmd", required=True)
+    serve = panel_sub.add_parser("serve", help="HTTP panel on 127.0.0.1 (calls, latency, Colab)")
+    serve.set_defaults(handler=_dashboard_serve)
     colab = sub.add_parser("colab", help="Colab GPU worker")
     colab_sub = colab.add_subparsers(dest="colab_cmd", required=True)
     status = colab_sub.add_parser("status", help="Health, RTT, backoff, and fallback flags")
@@ -76,6 +82,25 @@ def _dialer_originate(args: argparse.Namespace) -> int:
     }
     json.dump(payload, sys.stdout, indent=2)
     sys.stdout.write("\n")
+    return 0
+
+
+def _dashboard_serve(_args: argparse.Namespace) -> int:
+    try:
+        server = serve_dashboard(StageMetrics())
+    except (DashboardError, MetricsError) as exc:
+        json.dump({"error": str(exc)}, sys.stdout)
+        sys.stdout.write("\n")
+        return 1
+    host, port = server.server_address[:2]
+    url = f"http://{host}:{port}/"
+    json.dump({"dashboard_url": url, "api": f"{url}api/dashboard"}, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        server.shutdown()
+        server.server_close()
     return 0
 
 
