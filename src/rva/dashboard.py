@@ -7,8 +7,9 @@ import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from rva.call_activity import REGISTRY
 from rva.colab import ColabOrchestrator
-from rva.metrics import MetricsError, StageMetrics, _listen_family, _LoopbackServer
+from rva.metrics import LoopbackServer, StageMetrics, listen_family
 
 _LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
 _PANEL_HTML = """<!DOCTYPE html>
@@ -20,10 +21,12 @@ _PANEL_HTML = """<!DOCTYPE html>
     body { font-family: system-ui, sans-serif; margin: 1.5rem; }
     table { border-collapse: collapse; }
     td, th { border: 1px solid #ccc; padding: 0.35rem 0.75rem; }
+    #status_error { color: #a00; }
   </style>
 </head>
 <body>
   <h1>Ava agent (loopback)</h1>
+  <p id="status_error"></p>
   <p>Active calls: <span id="active_calls">—</span></p>
   <p>Colab: <span id="colab_status">—</span> (RTT <span id="colab_rtt">—</span> ms)</p>
   <h2>Latency (ms)</h2>
@@ -51,12 +54,21 @@ _PANEL_HTML = """<!DOCTYPE html>
       }
     }
     async function refresh() {
-      const res = await fetch("/api/dashboard");
-      const data = await res.json();
-      setText("active_calls", String(data.active_calls));
-      setText("colab_status", data.colab.status);
-      setText("colab_rtt", data.colab.rtt_ms == null ? "—" : String(data.colab.rtt_ms));
-      renderLatency(data.latency_ms);
+      try {
+        const res = await fetch("/api/dashboard");
+        if (!res.ok) {
+          setText("status_error", "Dashboard API error: " + res.status);
+          return;
+        }
+        const data = await res.json();
+        setText("status_error", "");
+        setText("active_calls", String(data.active_calls));
+        setText("colab_status", data.colab.status);
+        setText("colab_rtt", data.colab.rtt_ms == null ? "—" : String(data.colab.rtt_ms));
+        renderLatency(data.latency_ms);
+      } catch (err) {
+        setText("status_error", "Fetch failed");
+      }
     }
     refresh();
     setInterval(refresh, 2000);
@@ -68,33 +80,6 @@ _PANEL_HTML = """<!DOCTYPE html>
 
 class DashboardError(ValueError):
     """Invalid dashboard listen address."""
-
-
-class ActiveCallRegistry:
-    """Tracks Stasis channels currently in a call (in-process)."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._channel_ids: set[str] = set()
-
-    def on_stasis_start(self, channel_id: str) -> None:
-        with self._lock:
-            self._channel_ids.add(channel_id)
-
-    def on_stasis_end(self, channel_id: str) -> None:
-        with self._lock:
-            self._channel_ids.discard(channel_id)
-
-    def count(self) -> int:
-        with self._lock:
-            return len(self._channel_ids)
-
-    def reset_for_tests(self) -> None:
-        with self._lock:
-            self._channel_ids.clear()
-
-
-REGISTRY = ActiveCallRegistry()
 
 
 def _env_int(name: str, default: int) -> int:
@@ -115,8 +100,12 @@ def dashboard_port() -> int:
     return _env_int("RVA_DASHBOARD_PORT", 8765)
 
 
+def dashboard_metrics(metrics: StageMetrics | None = None) -> StageMetrics:
+    return metrics if metrics is not None else StageMetrics.shared()
+
+
 def build_dashboard_snapshot(metrics: StageMetrics) -> dict[str, object]:
-    colab = ColabOrchestrator.shared().refresh()
+    colab = ColabOrchestrator.shared().peek_status()
     if not colab.configured:
         colab_label = "DOWN"
     elif colab.health_ok:
@@ -137,12 +126,19 @@ def build_dashboard_snapshot(metrics: StageMetrics) -> dict[str, object]:
     }
 
 
+def dashboard_url(host: str, port: int) -> str:
+    if host == "::1":
+        return f"http://[::1]:{port}/"
+    return f"http://{host}:{port}/"
+
+
 def serve_dashboard(
-    metrics: StageMetrics,
+    metrics: StageMetrics | None = None,
     *,
     host: str | None = None,
     port: int | None = None,
 ) -> ThreadingHTTPServer:
+    store = dashboard_metrics(metrics)
     bind = host if host is not None else dashboard_host()
     listen_port = port if port is not None else dashboard_port()
     if bind not in _LOOPBACK:
@@ -159,12 +155,12 @@ def serve_dashboard(
                 self._send(200, body, "text/html; charset=utf-8")
                 return
             if path == "/api/dashboard":
-                payload = build_dashboard_snapshot(metrics)
+                payload = build_dashboard_snapshot(store)
                 body = json.dumps(payload, separators=(",", ":")).encode()
                 self._send(200, body, "application/json; charset=utf-8")
                 return
             if path == "/metrics":
-                body = json.dumps(metrics.snapshot(), separators=(",", ":")).encode()
+                body = json.dumps(store.snapshot(), separators=(",", ":")).encode()
                 self._send(200, body, "application/json; charset=utf-8")
                 return
             self.send_error(404)
@@ -177,6 +173,14 @@ def serve_dashboard(
             self.wfile.write(body)
 
     try:
-        return _LoopbackServer((bind, listen_port), Handler, _listen_family(bind))
+        return LoopbackServer((bind, listen_port), Handler, listen_family(bind))
     except OSError as exc:
-        raise MetricsError(str(exc)) from exc
+        raise DashboardError(str(exc)) from exc
+
+
+def shutdown_server(server: ThreadingHTTPServer) -> None:
+    """Stop a threaded dashboard server without deadlocking the caller."""
+    thread = threading.Thread(target=server.shutdown, daemon=True)
+    thread.start()
+    thread.join(timeout=5.0)
+    server.server_close()

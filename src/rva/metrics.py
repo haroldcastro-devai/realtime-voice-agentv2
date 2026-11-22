@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 STAGES: tuple[str, ...] = ("stt", "llm", "tts", "total")
 _LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
+_SHARED = None
 
 
 class MetricsError(ValueError):
@@ -33,6 +34,18 @@ def percentile_ms(samples: list[float], pct: float) -> float | None:
 
 class StageMetrics:
     """Bounded in-memory samples per pipeline stage, in milliseconds."""
+
+    @classmethod
+    def shared(cls) -> StageMetrics:
+        global _SHARED
+        if _SHARED is None:
+            _SHARED = cls()
+        return _SHARED
+
+    @classmethod
+    def reset_shared_for_tests(cls) -> None:
+        global _SHARED
+        _SHARED = None
 
     def __init__(self, max_samples: int = 256) -> None:
         if max_samples < 1:
@@ -63,7 +76,7 @@ class StageMetrics:
         }
 
 
-class _LoopbackServer(ThreadingHTTPServer):
+class LoopbackServer(ThreadingHTTPServer):
     """Threading HTTP server with an explicit IPv4 or IPv6 family."""
 
     def __init__(
@@ -76,7 +89,7 @@ class _LoopbackServer(ThreadingHTTPServer):
         super().__init__(server_address, request_handler)
 
 
-def _listen_family(host: str) -> int:
+def listen_family(host: str) -> int:
     if host == "::1":
         return socket.AF_INET6
     return socket.AF_INET
@@ -108,4 +121,4 @@ def serve_metrics(
             self.end_headers()
             self.wfile.write(body)
 
-    return _LoopbackServer((host, port), Handler, _listen_family(host))
+    return LoopbackServer((host, port), Handler, listen_family(host))

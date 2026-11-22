@@ -16,8 +16,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from rva.call_activity import REGISTRY
 from rva.colab import activate_call_pin, release_call_pin
-from rva.dashboard import REGISTRY
 from rva.session import CallSession
 
 _APP = "rva"
