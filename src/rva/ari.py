@@ -18,6 +18,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from rva.call_activity import REGISTRY
 from rva.colab import activate_call_pin, release_call_pin
+from rva.recordings import CALL_BUFFER, RecordingArchive
 from rva.session import CallSession
 
 _APP = "rva"
@@ -194,6 +195,8 @@ class AriApp:
                 if isinstance(channel_id, str):
                     session = self.sessions.pop(channel_id, None)
                     if session is not None:
+                        pcm = CALL_BUFFER.take_pcm(channel_id)
+                        RecordingArchive.shared().archive_completed_call(channel_id, pcm)
                         release_call_pin()
                         REGISTRY.on_stasis_end(channel_id)
                         for key, value in list(self.by_uuid.items()):
