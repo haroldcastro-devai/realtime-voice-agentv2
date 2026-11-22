@@ -27,8 +27,9 @@ The notebook:
 - No JavaScript or background loops to bypass idle disconnects.
 - Keep the notebook tab open while you demo; respect [Colab usage limits](https://research.google.com/colaboratory/faq.html).
 
-## Local wiring (later orchestrator issues)
+## Local wiring
 
 Point `RVA_STT_URL` and `RVA_TTS_URL` at the printed HTTPS base URL, set
-`RVA_STT_TOKEN` / `RVA_TTS_TOKEN` to the Bearer value, and use `http` backends in pytest locally
-with mocks.
+`RVA_STT_TOKEN` / `RVA_TTS_TOKEN` to the Bearer value, and set `RVA_COLAB_URL` /
+`RVA_COLAB_TOKEN` for health checks. Use `rva colab status` to read health, RTT,
+backoff, and STT/TTS fallback flags (`rva.colab` keeps HTTP pinned during an active call).

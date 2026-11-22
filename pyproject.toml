@@ -21,6 +21,9 @@ dev = [
   "ruff>=0.8.0",
 ]
 
+[project.scripts]
+rva = "rva.cli:main"
+
 [project.urls]
 Repository = "https://github.com/haroldcastro-devai/realtime-voice-agentv2"
 
