@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Run N pipeline turns and print per-stage p50/p95 (mock or ``RVA_*_BACKEND`` HTTP)."""
+"""Run N pipeline turns and print per-stage p50/p95 (mock or ``RVA_*_BACKEND`` HTTP).
+
+Uses :func:`rva.pipeline.build_pipeline` without :class:`~rva.colab.ColabOrchestrator`;
+HTTP benches exercise OpenAI-compatible URLs directly (Colab worker URL in env), not
+in-call fallback/backoff semantics.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +13,7 @@ import json
 import os
 import platform
 import sys
+from collections.abc import Callable
 from typing import Any
 
 from rva import __version__
@@ -52,7 +58,11 @@ def _dependency_versions() -> dict[str, str]:
     return versions
 
 
-def run_benchmark(turns: int, *, factory: Any = build_pipeline) -> dict[str, Any]:
+def run_benchmark(
+    turns: int,
+    *,
+    factory: Callable[..., Pipeline] = build_pipeline,
+) -> dict[str, Any]:
     if turns < 1:
         raise ValueError("turns must be at least 1")
     metrics = StageMetrics(max_samples=max(turns, 16))
@@ -70,7 +80,7 @@ def run_benchmark(turns: int, *, factory: Any = build_pipeline) -> dict[str, Any
 
 def _fmt_ms(value: float | int | None) -> str:
     if value is None:
-        return "—"
+        return "-"
     return f"{float(value):.3f}"
 
 
@@ -81,6 +91,7 @@ def format_report(data: dict[str, Any]) -> str:
         (
             "platform: "
             f"{data['platform']['system']} {data['platform']['machine']} "
+            f"{data['platform']['processor']} "
             f"py{data['platform']['python']}"
         ),
         ("versions: " + " ".join(f"{key}={val}" for key, val in sorted(data["versions"].items()))),

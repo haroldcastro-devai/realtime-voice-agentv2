@@ -69,7 +69,9 @@ GUI softphone, extension **1000**, listener on `0.0.0.0:8090`).
 
 ## Benchmarks
 
-Mock or HTTP backends (via ``RVA_*_BACKEND``):
+Mock or HTTP backends (via ``RVA_*_BACKEND``). The bench does not use
+``ColabOrchestrator`` fallback/backoff; point HTTP backends at your Colab or mock worker
+URLs in ``.env``.
 
 ```bash
 python scripts/bench_latency.py -n 32
