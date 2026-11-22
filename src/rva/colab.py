@@ -159,6 +159,11 @@ class ColabOrchestrator:
         self._in_call = False
         self._pinned_remote = False
 
+    def peek_status(self) -> ColabStatus:
+        """Read cached Colab status without network I/O or backoff mutation."""
+        now = self._clock()
+        return self._status_snapshot(backoff_remaining_s=max(0.0, self._backoff_until - now))
+
     def refresh(self) -> ColabStatus:
         if not self.colab_configured():
             return ColabStatus(

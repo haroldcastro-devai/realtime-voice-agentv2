@@ -133,6 +133,15 @@ class Pipeline:
         )
 
 
+def _metrics_from_env() -> StageMetrics | None:
+    raw = os.environ.get("RVA_RECORD_LATENCY")
+    if raw is None or raw == "" or raw == "CHANGE_ME":
+        return None
+    if raw.strip().lower() in ("1", "true", "yes", "on"):
+        return StageMetrics.shared()
+    return None
+
+
 def build_pipeline(
     metrics: StageMetrics | None = None,
     orchestrator: object | None = None,
@@ -144,8 +153,13 @@ def build_pipeline(
     stay on HTTP when pinned).
 
     When ``metrics`` is omitted, timings still land on ``TurnResult`` but are
-    not stored. Pass a ``StageMetrics`` for the dashboard API.
+    not stored unless ``RVA_RECORD_LATENCY=1`` (uses :meth:`StageMetrics.shared`
+    for the loopback dashboard in the same process).
+
+    Pass a ``StageMetrics`` explicitly to override.
     """
+    if metrics is None:
+        metrics = _metrics_from_env()
     stt_name = _backend_name("RVA_STT_BACKEND")
     tts_name = _backend_name("RVA_TTS_BACKEND")
     if orchestrator is not None:

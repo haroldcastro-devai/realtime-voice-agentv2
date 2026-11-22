@@ -8,14 +8,13 @@ import sys
 
 from rva.ari import AriClient, AriError
 from rva.colab import ColabOrchestrator
-from rva.dashboard import DashboardError, serve_dashboard
+from rva.dashboard import DashboardError, dashboard_url, serve_dashboard
 from rva.dialer import (
     DialerError,
     campaign_csv_from_env,
     load_acme_campaign,
     run_acme_campaign_jobs,
 )
-from rva.metrics import MetricsError, StageMetrics
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -87,20 +86,21 @@ def _dialer_originate(args: argparse.Namespace) -> int:
 
 def _dashboard_serve(_args: argparse.Namespace) -> int:
     try:
-        server = serve_dashboard(StageMetrics())
-    except (DashboardError, MetricsError) as exc:
+        server = serve_dashboard()
+    except DashboardError as exc:
         json.dump({"error": str(exc)}, sys.stdout)
         sys.stdout.write("\n")
         return 1
     host, port = server.server_address[:2]
-    url = f"http://{host}:{port}/"
+    url = dashboard_url(host, port)
     json.dump({"dashboard_url": url, "api": f"{url}api/dashboard"}, sys.stdout, indent=2)
     sys.stdout.write("\n")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        server.shutdown()
-        server.server_close()
+        from rva.dashboard import shutdown_server
+
+        shutdown_server(server)
     return 0
 
 

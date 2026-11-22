@@ -5,23 +5,23 @@ from __future__ import annotations
 import json
 import threading
 from http.client import HTTPConnection
-from pathlib import Path
 
 import pytest
 
 from rva.ari import AriApp
+from rva.call_activity import REGISTRY
 from rva.colab import ColabOrchestrator
 from rva.dashboard import (
-    REGISTRY,
-    ActiveCallRegistry,
     DashboardError,
     build_dashboard_snapshot,
+    dashboard_url,
     serve_dashboard,
+    shutdown_server,
 )
 from rva.metrics import StageMetrics
+from rva.pipeline import build_pipeline
 
 _LOOP = "127.0.0.1"
-_REPO = Path(__file__).resolve().parents[1]
 
 
 def _get(path: str, port: int) -> tuple[int, bytes]:
@@ -36,8 +36,9 @@ def _get(path: str, port: int) -> tuple[int, bytes]:
 
 def test_build_snapshot_includes_calls_colab_and_latency() -> None:
     ColabOrchestrator.reset_shared_for_tests()
+    StageMetrics.reset_shared_for_tests()
     REGISTRY.reset_for_tests()
-    metrics = StageMetrics()
+    metrics = StageMetrics.shared()
     metrics.record("total", 0.5)
     REGISTRY.on_stasis_start("ch-1")
     snap = build_dashboard_snapshot(metrics)
@@ -48,10 +49,34 @@ def test_build_snapshot_includes_calls_colab_and_latency() -> None:
     assert snap["latency_ms"]["total"]["n"] == 1
 
 
+def test_shared_metrics_visible_to_dashboard_and_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RVA_RECORD_LATENCY", "1")
+    ColabOrchestrator.reset_shared_for_tests()
+    StageMetrics.reset_shared_for_tests()
+    pipe = build_pipeline()
+    assert pipe.metrics is StageMetrics.shared()
+    pipe.turn(b"\x00" * 320, sample_rate=16_000)
+    snap = build_dashboard_snapshot(StageMetrics.shared())
+    assert snap["latency_ms"]["total"]["n"] >= 1
+
+
+def test_peek_status_does_not_increment_colab_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    ColabOrchestrator.reset_shared_for_tests()
+    monkeypatch.setenv("RVA_COLAB_URL", "http://127.0.0.1:9")
+    orch = ColabOrchestrator.shared()
+    before = orch.refresh().consecutive_failures
+    orch.peek_status()
+    after = orch.peek_status()
+    assert after.consecutive_failures == before
+
+
 def test_dashboard_api_on_loopback() -> None:
     ColabOrchestrator.reset_shared_for_tests()
+    StageMetrics.reset_shared_for_tests()
     REGISTRY.reset_for_tests()
-    metrics = StageMetrics()
+    metrics = StageMetrics.shared()
     metrics.record("stt", 0.01)
     server = serve_dashboard(metrics, host=_LOOP, port=0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -69,8 +94,7 @@ def test_dashboard_api_on_loopback() -> None:
         assert code2 == 200
         assert b"stt" in body2
     finally:
-        server.shutdown()
-        server.server_close()
+        shutdown_server(server)
 
 
 def test_dashboard_html_uses_text_content_not_inner_html() -> None:
@@ -84,9 +108,14 @@ def test_dashboard_html_uses_text_content_not_inner_html() -> None:
         text = body.decode("utf-8")
         assert "textContent" in text
         assert "innerHTML" not in text
+        assert "status_error" in text
+        assert "Fetch failed" in text
     finally:
-        server.shutdown()
-        server.server_close()
+        shutdown_server(server)
+
+
+def test_dashboard_url_ipv6_literal() -> None:
+    assert dashboard_url("::1", 8765) == "http://[::1]:8765/"
 
 
 def test_serve_dashboard_rejects_public_bind() -> None:
@@ -109,10 +138,20 @@ def test_ari_stasis_updates_active_call_registry() -> None:
     assert REGISTRY.count() == 0
 
 
-def test_active_call_registry_is_thread_safe() -> None:
-    reg = ActiveCallRegistry()
-    reg.on_stasis_start("a")
-    reg.on_stasis_start("b")
-    assert reg.count() == 2
-    reg.on_stasis_end("a")
-    assert reg.count() == 1
+def test_active_call_registry_concurrent_updates() -> None:
+    REGISTRY.reset_for_tests()
+    barrier = threading.Barrier(3)
+
+    def worker(prefix: str) -> None:
+        barrier.wait()
+        for i in range(50):
+            ch = f"{prefix}-{i}"
+            REGISTRY.on_stasis_start(ch)
+            REGISTRY.on_stasis_end(ch)
+
+    threads = [threading.Thread(target=worker, args=(f"t{n}",)) for n in range(3)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert REGISTRY.count() == 0
