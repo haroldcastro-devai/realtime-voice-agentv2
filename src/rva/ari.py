@@ -155,9 +155,9 @@ class AriApp:
                 raise AriError("StasisStart missing channel id")
             audio_uuid = _stasis_uuid(event)
             session = self._factory()
-            activate_call_pin()
             if self.rest is not None:
                 self.rest.continue_channel(channel_id, self.continue_context, self.continue_exten)
+            activate_call_pin()
             self.sessions[channel_id] = session
             if audio_uuid is not None:
                 self.by_uuid[audio_uuid] = session

@@ -80,6 +80,24 @@ def _stasis_start(channel_id: str = "ch-1") -> dict[str, object]:
     }
 
 
+def test_continue_failure_does_not_pin_colab(monkeypatch) -> None:
+    ColabOrchestrator.reset_shared_for_tests()
+    monkeypatch.setenv("RVA_COLAB_URL", "http://127.0.0.1:9")
+    monkeypatch.setenv("RVA_STT_BACKEND", "http")
+
+    class Boom:
+        def continue_channel(self, _channel_id: str, _context: str, _exten: str) -> None:
+            raise AriError("continue failed")
+
+    app = AriApp(rest=Boom())
+    with pytest.raises(AriError):
+        app.handle_event(_stasis_start("chan-boom"))
+    snap = ColabOrchestrator.shared().refresh()
+    assert snap.in_call is False
+    assert snap.pinned_remote is False
+    ColabOrchestrator.reset_shared_for_tests()
+
+
 def test_stasis_start_pins_colab_when_http_backends(monkeypatch) -> None:
     ColabOrchestrator.reset_shared_for_tests()
     monkeypatch.setenv("RVA_COLAB_URL", "http://127.0.0.1:9")
