@@ -21,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _colab_status(_args: argparse.Namespace) -> int:
-    orch = ColabOrchestrator()
+    orch = ColabOrchestrator.shared()
     snap = orch.refresh()
     payload = {
         "configured": snap.configured,

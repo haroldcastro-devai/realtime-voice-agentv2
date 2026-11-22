@@ -7,10 +7,22 @@ import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from urllib.error import URLError
-from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+_HTTP = "http"
 
 _PROBE = Callable[[str, str | None, float], tuple[bool, float | None]]
+
+_SHARED = None
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        return None
+
+
+_OPENER = build_opener(_NoRedirect)
 
 
 def _env(name: str) -> str | None:
@@ -63,9 +75,12 @@ def probe_colab_health(
     req = Request(url, headers=headers, method="GET")
     t0 = time.perf_counter()
     try:
-        with urlopen(req, timeout=timeout_s) as resp:
+        with _OPENER.open(req, timeout=timeout_s) as resp:
             payload = resp.read()
             status = resp.status
+    except HTTPError:
+        rtt = (time.perf_counter() - t0) * 1000.0
+        return False, rtt
     except (TimeoutError, URLError, OSError):
         rtt = (time.perf_counter() - t0) * 1000.0
         return False, rtt
@@ -92,8 +107,29 @@ class ColabStatus:
     pinned_remote: bool
 
 
+def remote_stt_tts_requested() -> bool:
+    """True when env points STT or TTS at HTTP backends (Colab path)."""
+    for key in ("RVA_STT_BACKEND", "RVA_TTS_BACKEND"):
+        raw = os.environ.get(key, "mock").strip().lower()
+        if raw == _HTTP:
+            return True
+    return False
+
+
 class ColabOrchestrator:
     """Probe ``RVA_COLAB_URL``; backoff on failure; pin HTTP STT/TTS during a call."""
+
+    @classmethod
+    def shared(cls) -> ColabOrchestrator:
+        global _SHARED
+        if _SHARED is None:
+            _SHARED = cls()
+        return _SHARED
+
+    @classmethod
+    def reset_shared_for_tests(cls) -> None:
+        global _SHARED
+        _SHARED = None
 
     def __init__(
         self,
@@ -136,6 +172,8 @@ class ColabOrchestrator:
                 pinned_remote=self._pinned_remote,
             )
         now = self._clock()
+        if self._pinned_remote and self._in_call:
+            return self._status_snapshot(backoff_remaining_s=max(0.0, self._backoff_until - now))
         if now < self._backoff_until and not self._pinned_remote:
             return self._status_snapshot(backoff_remaining_s=self._backoff_until - now)
         url = _env("RVA_COLAB_URL")
@@ -176,3 +214,17 @@ class ColabOrchestrator:
             in_call=self._in_call,
             pinned_remote=self._pinned_remote,
         )
+
+
+def activate_call_pin(orchestrator: ColabOrchestrator | None = None) -> None:
+    """Pin remote STT/TTS for an active call (ARI / AudioSocket lifecycle)."""
+    if not ColabOrchestrator.colab_configured():
+        return
+    orch = orchestrator or ColabOrchestrator.shared()
+    if remote_stt_tts_requested():
+        orch.enter_call(remote_stt_tts=True)
+
+
+def release_call_pin(orchestrator: ColabOrchestrator | None = None) -> None:
+    orch = orchestrator or ColabOrchestrator.shared()
+    orch.leave_call()
