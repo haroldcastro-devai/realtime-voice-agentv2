@@ -67,9 +67,18 @@ See [deploy/asterisk/README.md](deploy/asterisk/README.md) and [SMOKE.md](deploy
 From `deploy/asterisk`: `docker compose up`, then follow the smoke doc (pjsua or a
 GUI softphone, extension **1000**, listener on `0.0.0.0:8090`).
 
+## Benchmarks
+
+Mock or HTTP backends (via ``RVA_*_BACKEND``):
+
+```bash
+python scripts/bench_latency.py -n 32
+python scripts/bench_latency.py -n 32 --json
+```
+
 ## Roadmap
 
-Measured benchmarks and README demo script (NAT-35).
+README demo script with measured numbers (NAT-35).
 Tracked in Jira project NAT.
 
 ## License
