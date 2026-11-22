@@ -29,12 +29,18 @@ Use [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/c
 prefer Cloudflare over ngrok. The Colab runtime cannot expose port 8000 by itself, so run the
 tunnel **inside the same Colab session** (extra cell below) or use Option A.
 
-**Inside Colab** (after the FastAPI thread is listening on port **8000**):
+**Inside Colab** (after the FastAPI thread is listening on port **8000**).
+
+One-time per runtime (Linux amd64 Colab VM):
 
 ```python
-# One-time per runtime (Linux amd64 Colab VM):
-# !wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
-# !chmod +x /usr/local/bin/cloudflared
+!wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
+!chmod +x /usr/local/bin/cloudflared
+```
+
+Quick tunnel (reads the public URL from cloudflared logs):
+
+```python
 import re
 import subprocess
 
@@ -60,13 +66,27 @@ else:
     print("cloudflared did not print a trycloudflare URL yet")
 ```
 
-Point local `RVA_STT_URL` / `RVA_TTS_URL` at `{url}/v1/audio/transcriptions` and
-`{url}/v1/audio/speech` bases (same HTTPS host, OpenAI-shaped paths on `nemo_server`).
+Copy the printed HTTPS base to your local `.env` as in Option A step 4 (`RVA_COLAB_URL` /
+`RVA_STT_URL` / `RVA_TTS_URL` — **no trailing slash**). The RVA agent appends
+`/v1/audio/transcriptions` and `/v1/audio/speech` itself. **Do not** save the tunnel URL in
+git; it changes when the tunnel restarts.
 
-Copy the printed URL to your local `.env` as in step 4 above. **Do not** save the tunnel URL
-in git; it changes when the tunnel restarts.
+For a **named** Cloudflare Tunnel, create it in the [Cloudflare Zero Trust dashboard](https://one.dash.cloudflare.com/), route HTTP to `localhost:8000`, and set `CLOUDFLARE_TUNNEL_TOKEN` in Colab Secrets only (not in repo). In Colab:
 
-For a named Cloudflare Tunnel, create the tunnel in the [Cloudflare Zero Trust dashboard](https://one.dash.cloudflare.com/) and set `CLOUDFLARE_TUNNEL_TOKEN` in Colab Secrets only (not in repo).
+```python
+from google.colab import userdata
+import subprocess
+
+token = userdata.get("CLOUDFLARE_TUNNEL_TOKEN")
+subprocess.Popen(
+    ["/usr/local/bin/cloudflared", "tunnel", "run", "--token", token],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+    text=True,
+)
+```
+
+Use the public hostname from your tunnel config as the `RVA_*_URL` HTTPS base on the PC.
 
 ## Security
 
